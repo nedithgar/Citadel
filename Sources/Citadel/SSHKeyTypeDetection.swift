@@ -114,7 +114,7 @@ public enum SSHKeyDetection {
     
     /// Detects the type of an OpenSSH private key by parsing its structure.
     private static func parseOpenSSHPrivateKey(from keyString: String) throws -> SSHKeyType {
-        var key = keyString.replacingOccurrences(of: "\n", with: "")
+        var keyContent = keyString.replacingOccurrences(of: "\n", with: "")
         
         guard
             key.hasPrefix("-----BEGIN OPENSSH PRIVATE KEY-----"),
