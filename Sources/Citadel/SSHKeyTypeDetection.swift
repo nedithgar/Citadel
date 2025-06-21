@@ -85,7 +85,7 @@ public enum SSHKeyDetectionError: LocalizedError, Equatable {
         case .invalidKeyFormat(let reason):
             return "The key string is not in a valid SSH-key format" + (reason.map { ": \($0)" } ?? "")
         case .unsupportedKeyType(let type):
-            return "The key type \(type ?? "") is not supported"
+            return "The key type is not supported" + (type.map { " (raw value: \($0))" } ?? "")
         case .invalidPrivateKeyFormat:
             return "The private key format is invalid or corrupted"
         case .malformedKey:
