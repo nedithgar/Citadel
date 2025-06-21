@@ -55,22 +55,31 @@ public struct SSHKeyType: RawRepresentable, Equatable, Hashable, CaseIterable, C
 
 
 /// Errors that can occur during SSH key type detection.
-public enum SSHKeyDetectionError: Error {
-    case invalidKeyFormat
-    case unsupportedKeyType
+public enum SSHKeyDetectionError: LocalizedError {
+    case invalidKeyFormat(reason: String? = nil)
+    case unsupportedKeyType(type: String? = nil)
     case invalidPrivateKeyFormat
     case malformedKey
-    
-    public var localizedDescription: String {
+    case encryptedPrivateKey              // key is encrypted, no pass-phrase handled yet
+    case passphraseRequired               // caller gave none
+    case incorrectPassphrase              // caller gave one, but it was wrong
+
+    public var errorDescription: String? {
         switch self {
-        case .invalidKeyFormat:
-            return "The provided key string is not in a valid SSH key format"
-        case .unsupportedKeyType:
-            return "The key type is not supported"
+        case .invalidKeyFormat(let reason):
+            return "The key string is not in a valid SSH-key format" + (reason.map { ": \($0)" } ?? "")
+        case .unsupportedKeyType(let type):
+            return "The key type \(type ?? "") is not supported"
         case .invalidPrivateKeyFormat:
             return "The private key format is invalid or corrupted"
         case .malformedKey:
             return "The key string is malformed"
+        case .encryptedPrivateKey:
+            return "The private key is encrypted"
+        case .passphraseRequired:
+            return "A passphrase is required to decrypt the private key"
+        case .incorrectPassphrase:
+            return "The provided passphrase is incorrect"
         }
     }
 }
@@ -108,7 +117,7 @@ public enum SSHKeyDetection {
             }
         }
         
-        throw SSHKeyDetectionError.invalidKeyFormat
+        throw SSHKeyDetectionError.invalidKeyFormat(reason: "The key string does not match any known SSH public key format.")
     }
     
     /// Detects the type of an SSH private key from its string representation.
@@ -224,7 +233,7 @@ public enum SSHKeyDetection {
         }
         
         guard let keyType = SSHKeyType(rawValue: keyTypeString) else {
-            throw SSHKeyDetectionError.unsupportedKeyType
+            throw SSHKeyDetectionError.unsupportedKeyType(type: keyTypeString)
         }
         
         return keyType
