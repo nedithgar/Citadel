@@ -55,7 +55,7 @@ public struct SSHKeyType: RawRepresentable, Equatable, Hashable, CaseIterable, C
 
 
 /// Errors that can occur during SSH key type detection.
-public enum SSHKeyDetectionError: LocalizedError {
+public enum SSHKeyDetectionError: LocalizedError, Equatable {
     case invalidKeyFormat(reason: String? = nil)
     case unsupportedKeyType(type: String? = nil)
     case invalidPrivateKeyFormat
@@ -63,6 +63,22 @@ public enum SSHKeyDetectionError: LocalizedError {
     case encryptedPrivateKey              // key is encrypted, no pass-phrase handled yet
     case passphraseRequired               // caller gave none
     case incorrectPassphrase              // caller gave one, but it was wrong
+
+    // Equality only cares about the *case*, not the associated text.
+    public static func == (lhs: SSHKeyDetectionError, rhs: SSHKeyDetectionError) -> Bool {
+        switch (lhs, rhs) {
+        case (.invalidKeyFormat,       .invalidKeyFormat),
+             (.unsupportedKeyType,     .unsupportedKeyType),
+             (.invalidPrivateKeyFormat,.invalidPrivateKeyFormat),
+             (.malformedKey,           .malformedKey),
+             (.encryptedPrivateKey,    .encryptedPrivateKey),
+             (.passphraseRequired,     .passphraseRequired),
+             (.incorrectPassphrase,    .incorrectPassphrase):
+            return true
+        default:
+            return false
+        }
+    }
 
     public var errorDescription: String? {
         switch self {
