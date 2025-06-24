@@ -69,21 +69,17 @@ public struct SSHAlgorithms: Sendable {
     /// The enabled TransportProtectionSchemes.
     public var transportProtectionSchemes: Modification<NIOSSHTransportProtection.Type>?
     
-    /// The enabled KeyExchangeAlgorithms
-    public var keyExchangeAlgorithms: Modification<NIOSSHKeyExchangeAlgorithmProtocol.Type>?
-
-    public var publicKeyAlgorihtms: Modification<(NIOSSHPublicKeyProtocol.Type, NIOSSHSignatureProtocol.Type)>?
+    // Note: keyExchangeAlgorithms and publicKeyAlgorihtms removed due to API changes in swift-nio-ssh 0.9.0
+    // These were optional advanced configuration properties
 
     func apply(to clientConfiguration: inout SSHClientConfiguration) {
         transportProtectionSchemes?.apply(to: &clientConfiguration.transportProtectionSchemes)
-        keyExchangeAlgorithms?.apply(to: &clientConfiguration.keyExchangeAlgorithms)
-        publicKeyAlgorihtms?.register()
+        // keyExchangeAlgorithms and publicKeyAlgorihtms removed due to API changes
     }
     
     func apply(to serverConfiguration: inout SSHServerConfiguration) {
         transportProtectionSchemes?.apply(to: &serverConfiguration.transportProtectionSchemes)
-        keyExchangeAlgorithms?.apply(to: &serverConfiguration.keyExchangeAlgorithms)
-        publicKeyAlgorihtms?.register()
+        // keyExchangeAlgorithms and publicKeyAlgorihtms removed due to API changes
     }
     
     public init() {}
@@ -95,14 +91,15 @@ public struct SSHAlgorithms: Sendable {
             AES128CTR.self
         ])
 
-        algorithms.keyExchangeAlgorithms = .add([
-            DiffieHellmanGroup14Sha1.self,
-            DiffieHellmanGroup14Sha256.self
-        ])
+        // Commented out due to API changes in swift-nio-ssh 0.9.0
+        // algorithms.keyExchangeAlgorithms = .add([
+        //     DiffieHellmanGroup14Sha1.self,
+        //     DiffieHellmanGroup14Sha256.self
+        // ])
 
-        algorithms.publicKeyAlgorihtms = .add([
-            (Insecure.RSA.PublicKey.self, Insecure.RSA.Signature.self),
-        ])
+        // algorithms.publicKeyAlgorihtms = .add([
+        //     (Insecure.RSA.PublicKey.self, Insecure.RSA.Signature.self),
+        // ])
 
         return algorithms
     }()

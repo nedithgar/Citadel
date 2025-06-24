@@ -16,9 +16,22 @@ public final class AES128CTR: NIOSSHTransportProtection {
     ]
     public static let cipherBlockSize = 16
     public static let cipherName = "aes128-ctr"
+    
+    // New API requirements for swift-nio-ssh 0.9.0+
+    public static var macName: String? { "hmac-sha2-256" } // Default MAC
+    public static var keySizes: ExpectedKeySizes {
+        return ExpectedKeySizes(
+            ivSize: 16,
+            encryptionKeySize: 16, // 128 bits
+            macKeySize: SHA256.byteCount
+        )
+    }
+    
     public var macBytes: Int {
         keySizes.macKeySize
     }
+    
+    public var lengthEncrypted: Bool { false }
     
     public static func keySizes(forMac mac: String?) throws -> ExpectedKeySizes {
         let macKeySize: Int
@@ -46,6 +59,11 @@ public final class AES128CTR: NIOSSHTransportProtection {
     private var encryptionContext: UnsafeMutablePointer<EVP_CIPHER_CTX>
     private let mac: Mac
     private let keySizes: ExpectedKeySizes
+    
+    // New API conformance for swift-nio-ssh 0.9.0+
+    public init(initialKeys: NIOSSHSessionKeys) throws {
+        try self.init(initialKeys: initialKeys, mac: Self.macName)
+    }
     
     public init(initialKeys: NIOSSHSessionKeys, mac: String?) throws {
         let keySizes = try Self.keySizes(forMac: mac)
