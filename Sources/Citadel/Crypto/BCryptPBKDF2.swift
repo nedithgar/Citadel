@@ -1,6 +1,5 @@
 import Foundation
 import Crypto
-import CCryptoBoringSSL
 
 public struct BCryptPBKDF2 {
     private static let BCRYPT_WORDS: Int = 8
@@ -14,40 +13,106 @@ public struct BCryptPBKDF2 {
     ) throws -> Data {
         precondition(rounds > 0, "Rounds must be positive")
         precondition(keyLength > 0, "Key length must be positive")
-        let sha2pass = SHA512.hash(data: password)
         
-        var key = Data(count: keyLength)
+        return password.withUnsafeBytes { passwordBytes in
+            salt.withUnsafeBytes { saltBytes in
+                // Use ContiguousArray for better performance
+                var key = ContiguousArray<UInt8>(repeating: 0, count: keyLength)
+                
+                pbkdfOptimized(
+                    password: passwordBytes.bindMemory(to: UInt8.self),
+                    salt: saltBytes.bindMemory(to: UInt8.self),
+                    keyOutput: &key,
+                    keyLength: keyLength,
+                    rounds: rounds
+                )
+                
+                return Data(key)
+            }
+        }
+    }
+    
+    @inline(__always)
+    private static func pbkdfOptimized(
+        password: UnsafeBufferPointer<UInt8>,
+        salt: UnsafeBufferPointer<UInt8>,
+        keyOutput: inout ContiguousArray<UInt8>,
+        keyLength: Int,
+        rounds: Int
+    ) {
+        // Pre-allocate SHA512 buffers
+        var sha2pass = ContiguousArray<UInt8>(repeating: 0, count: 64)
+        // var sha2salt = ContiguousArray<UInt8>(repeating: 0, count: 64) // Not used
+        var sha2countsalt = ContiguousArray<UInt8>(repeating: 0, count: 64)
+        var sha2tmpout = ContiguousArray<UInt8>(repeating: 0, count: 64)
+        
+        // Hash password once
+        let hashedPassword = SHA512.hash(data: password)
+        sha2pass = ContiguousArray(hashedPassword)
+        
         let stride = (keyLength + BCRYPT_HASHSIZE - 1) / BCRYPT_HASHSIZE
         let amt = (keyLength + stride - 1) / stride
         
-        let origKeyLen = keyLength
+        // Pre-allocate buffers for bcrypt operations
+        var tmpout = ContiguousArray<UInt8>(repeating: 0, count: BCRYPT_HASHSIZE)
+        var out = ContiguousArray<UInt8>(repeating: 0, count: BCRYPT_HASHSIZE)
         
         // pbkdf2 deviation: output the key material non-linearly
-        for count in 1...UInt32.max {
-            if (Int(count - 1) * amt) >= origKeyLen {
+        for count: UInt32 in 1...UInt32.max {
+            if (Int(count - 1) * amt) >= keyLength {
                 break
             }
-            var countsalt = Data()
-            countsalt.append(salt)
-            countsalt.append(contentsOf: withUnsafeBytes(of: count.bigEndian) { Data($0) })
             
-            let sha2countsalt = SHA512.hash(data: countsalt)
+            // Create countsalt = salt || count (big-endian)
+            var countsalt = ContiguousArray<UInt8>()
+            countsalt.reserveCapacity(salt.count + 4)
+            countsalt.append(contentsOf: salt)
+            let countBE = count.bigEndian
+            withUnsafeBytes(of: countBE) { bytes in
+                countsalt.append(contentsOf: bytes)
+            }
             
-            var tmpout = try bcryptHash(
-                sha2pass: Data(sha2pass),
-                sha2salt: Data(sha2countsalt)
-            )
+            // Hash countsalt
+            let hashedCountsalt = SHA512.hash(data: countsalt)
+            sha2countsalt = ContiguousArray(hashedCountsalt)
             
-            var out = tmpout
+            // First round
+            sha2pass.withUnsafeBufferPointer { sha2passBuffer in
+                sha2countsalt.withUnsafeBufferPointer { sha2countsaltBuffer in
+                    tmpout.withUnsafeMutableBufferPointer { tmpoutBuffer in
+                        bcryptHashOptimized(
+                            sha2pass: sha2passBuffer,
+                            sha2salt: sha2countsaltBuffer,
+                            output: tmpoutBuffer
+                        )
+                    }
+                }
+            }
             
+            // Copy first round to out
+            out = tmpout
+            
+            // Subsequent rounds
             for _ in 1..<rounds {
-                let sha2tmpout = SHA512.hash(data: tmpout)
-                tmpout = try bcryptHash(
-                    sha2pass: Data(sha2pass),
-                    sha2salt: Data(sha2tmpout)
-                )
+                // Hash tmpout
+                let hashedTmpout = SHA512.hash(data: tmpout)
+                sha2tmpout = ContiguousArray(hashedTmpout)
                 
-                for j in 0..<out.count {
+                // bcrypt hash
+                sha2pass.withUnsafeBufferPointer { sha2passBuffer in
+                    sha2tmpout.withUnsafeBufferPointer { sha2tmpoutBuffer in
+                        tmpout.withUnsafeMutableBufferPointer { tmpoutBuffer in
+                            bcryptHashOptimized(
+                                sha2pass: sha2passBuffer,
+                                sha2salt: sha2tmpoutBuffer,
+                                output: tmpoutBuffer
+                            )
+                        }
+                    }
+                }
+                
+                // XOR with out
+                for j in 0..<BCRYPT_HASHSIZE {
                     out[j] ^= tmpout[j]
                 }
             }
@@ -55,47 +120,54 @@ public struct BCryptPBKDF2 {
             // pbkdf2 deviation: output the key material non-linearly
             for i in 0..<amt {
                 let destIdx = i * stride + Int(count - 1)
-                if destIdx >= origKeyLen {
+                if destIdx >= keyLength {
                     break
                 }
-                key[destIdx] = out[i]
+                keyOutput[destIdx] = out[i]
+            }
+        }
+    }
+    
+    @inline(__always)
+    private static func bcryptHashOptimized(
+        sha2pass: UnsafeBufferPointer<UInt8>,
+        sha2salt: UnsafeBufferPointer<UInt8>,
+        output: UnsafeMutableBufferPointer<UInt8>
+    ) {
+        var state = BlowfishContext()
+        let ciphertext = ContiguousArray("OxychromaticBlowfishSwatDynamite".utf8)
+        var cdata = ContiguousArray<UInt32>(repeating: 0, count: BCRYPT_WORDS)
+        
+        state.initializeState()
+        state.expandState(data: sha2salt, key: sha2pass)
+        
+        for _ in 0..<64 {
+            state.expand0State(key: sha2salt)
+            state.expand0State(key: sha2pass)
+        }
+        
+        // Convert ciphertext to UInt32 array
+        ciphertext.withUnsafeBufferPointer { ciphertextBuffer in
+            var j = 0
+            for i in 0..<BCRYPT_WORDS {
+                cdata[i] = BlowfishContext.stream2word(ciphertextBuffer, &j)
             }
         }
         
-        return key
-    }
-    
-    private static func bcryptHash(sha2pass: Data, sha2salt: Data) throws -> Data {
-        var state = BlowfishContext()
-        let ciphertext: [UInt8] = Array("OxychromaticBlowfishSwatDynamite".utf8)
-        var cdata = [UInt32](repeating: 0, count: BCRYPT_WORDS)
-        
-        state.initializeState()
-        state.expandState(data: Array(sha2salt), key: Array(sha2pass))
-        
-        for _ in 0..<64 {
-            state.expand0State(key: Array(sha2salt))
-            state.expand0State(key: Array(sha2pass))
+        // Encrypt
+        cdata.withUnsafeMutableBufferPointer { cdataBuffer in
+            for _ in 0..<64 {
+                state.encrypt(cdataBuffer, blocks: BCRYPT_WORDS / 2)
+            }
         }
         
-        var j: UInt16 = 0
+        // Convert back to bytes (big-endian)
         for i in 0..<BCRYPT_WORDS {
-            cdata[i] = BlowfishContext.stream2word(ciphertext, &j)
+            output[4 * i + 3] = UInt8((cdata[i] >> 24) & 0xff)
+            output[4 * i + 2] = UInt8((cdata[i] >> 16) & 0xff)
+            output[4 * i + 1] = UInt8((cdata[i] >> 8) & 0xff)
+            output[4 * i + 0] = UInt8(cdata[i] & 0xff)
         }
-        
-        for _ in 0..<64 {
-            state.encrypt(&cdata, blocks: BCRYPT_WORDS / 2)
-        }
-        
-        var out = Data(count: BCRYPT_HASHSIZE)
-        for i in 0..<BCRYPT_WORDS {
-            out[4 * i + 3] = UInt8((cdata[i] >> 24) & 0xff)
-            out[4 * i + 2] = UInt8((cdata[i] >> 16) & 0xff)
-            out[4 * i + 1] = UInt8((cdata[i] >> 8) & 0xff)
-            out[4 * i + 0] = UInt8(cdata[i] & 0xff)
-        }
-        
-        return out
     }
 }
 

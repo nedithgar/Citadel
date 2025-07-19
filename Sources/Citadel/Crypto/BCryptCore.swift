@@ -123,20 +123,32 @@ struct BCrypt {
         }
         
         state.initializeState()
-        state.expandState(data: csalt, key: keyBytes)
+        csalt.withUnsafeBufferPointer { csaltBuffer in
+            keyBytes.withUnsafeBufferPointer { keyBuffer in
+                state.expandState(data: csaltBuffer, key: keyBuffer)
+            }
+        }
         
         for _ in 0..<rounds {
-            state.expand0State(key: keyBytes)
-            state.expand0State(key: csalt)
+            keyBytes.withUnsafeBufferPointer { keyBuffer in
+                state.expand0State(key: keyBuffer)
+            }
+            csalt.withUnsafeBufferPointer { csaltBuffer in
+                state.expand0State(key: csaltBuffer)
+            }
         }
         
-        var j: UInt16 = 0
-        for i in 0..<BCRYPT_WORDS {
-            cdata[i] = BlowfishContext.stream2word(ciphertext, &j)
+        var j = 0
+        ciphertext.withUnsafeBufferPointer { ciphertextBuffer in
+            for i in 0..<BCRYPT_WORDS {
+                cdata[i] = BlowfishContext.stream2word(ciphertextBuffer, &j)
+            }
         }
         
-        for _ in 0..<64 {
-            state.encrypt(&cdata, blocks: BCRYPT_WORDS / 2)
+        cdata.withUnsafeMutableBufferPointer { cdataBuffer in
+            for _ in 0..<64 {
+                state.encrypt(cdataBuffer, blocks: BCRYPT_WORDS / 2)
+            }
         }
         
         for i in 0..<BCRYPT_WORDS {
