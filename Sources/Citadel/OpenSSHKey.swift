@@ -3,7 +3,6 @@ import BigInt
 import Foundation
 import NIO
 import Crypto
-import CCitadelBcrypt
 import NIOSSH
 
 // Noteable links:
@@ -259,27 +258,16 @@ enum OpenSSH {
                     throw KeyError.missingDecryptionKey
                 }
                 
-                guard _SHA512.didInit else {
-                    fatalError("Internal library error")
-                }
                 
-                return try decryptionKey.withUnsafeBytes { decryptionKey in
-                    let salt = salt.readBytes(length: salt.readableBytes)!
-                    var key = [UInt8](repeating: 0, count: cipher.keyLength + cipher.ivLength)
-                    guard citadel_bcrypt_pbkdf(
-                        decryptionKey.baseAddress!,
-                        decryptionKey.count,
-                        salt,
-                        salt.count,
-                        &key,
-                        cipher.keyLength + cipher.ivLength,
-                        iterations
-                    ) == 0 else {
-                        throw KeyError.cryptoError
-                    }
-                    
-                    return try perform(Array(key[..<cipher.keyLength]), Array(key[cipher.keyLength...]))
-                }
+                let salt = salt.readBytes(length: salt.readableBytes)!
+                let key = try BCryptPBKDF2.pbkdf(
+                    password: decryptionKey,
+                    salt: Data(salt),
+                    keyLength: cipher.keyLength + cipher.ivLength,
+                    rounds: Int(iterations)
+                )
+                
+                return try perform(Array(key[..<cipher.keyLength]), Array(key[cipher.keyLength...]))
             }
         }
     }

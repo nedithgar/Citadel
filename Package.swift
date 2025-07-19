@@ -24,11 +24,9 @@ let package = Package(
         .package(url: "https://github.com/mtynior/ColorizeSwift.git", from: "1.5.0"),
     ],
     targets: [
-        .target(name: "CCitadelBcrypt"),
         .target(
             name: "Citadel",
             dependencies: [
-                .target(name: "CCitadelBcrypt"),
                 .product(name: "NIOSSH", package: "swift-nio-ssh"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
