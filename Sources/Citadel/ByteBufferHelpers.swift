@@ -126,6 +126,20 @@ extension ByteBuffer {
         setInteger(UInt32(writerIndex - oldWriterIndex - 4), at: oldWriterIndex)
     }
     
+    @discardableResult
+    mutating func writeSSHString(_ data: Data) -> Int {
+        let oldWriterIndex = writerIndex
+        writeInteger(UInt32(data.count))
+        writeBytes(data)
+        return writerIndex - oldWriterIndex
+    }
+    
+    @discardableResult
+    mutating func writeSSHString<S: Sequence>(_ bytes: S) -> Int where S.Element == UInt8 {
+        let data = Data(bytes)
+        return writeSSHString(data)
+    }
+    
     mutating func readSSHString() -> String? {
         guard
             let length = getInteger(at: self.readerIndex, as: UInt32.self),
@@ -151,6 +165,9 @@ extension ByteBuffer {
     }
     
     mutating func readSSHBignum() -> Data? {
+        // SSH bignum format: a 4-byte length field followed by the bignum data.
+        // The data may have a leading zero byte if it was added during serialization
+        // to ensure the number is interpreted as unsigned (preventing MSB issues).
         guard let buffer = readSSHBuffer() else {
             return nil
         }
@@ -161,11 +178,15 @@ extension ByteBuffer {
     mutating func writeSSHBignum(_ bignum: BigInt) {
         var data = bignum.serialize()
         
-        // SSH bignum format: prepend zero byte if MSB is set
+        // SSH bignum format requires that the number is always interpreted as unsigned.
+        // If the most significant bit (MSB) of the first byte is set, the number could
+        // be misinterpreted as negative in two's complement representation. To prevent
+        // this, a zero byte is prepended to the data, ensuring the MSB is not set.
         if !data.isEmpty && (data[0] & 0x80) != 0 {
             data.insert(0, at: 0)
         }
         
+        // Write the length of the bignum data as a 4-byte unsigned integer, followed by the data itself
         writeInteger(UInt32(data.count))
         writeBytes(data)
     }

@@ -4,6 +4,19 @@ import _CryptoExtras
 import NIOCore
 import BigInt
 
+// MARK: - Helper Functions
+
+/// Writes ECDSA public key data to a buffer in SSH format
+/// - Parameters:
+///   - buffer: The buffer to write to
+///   - publicKeyData: The public key data in x963 representation
+/// - Returns: The number of bytes written
+private func writeECDSAPublicKey(to buffer: inout ByteBuffer, publicKeyData: Data) -> Int {
+    let start = buffer.writerIndex
+    buffer.writeSSHString(publicKeyData)
+    return buffer.writerIndex - start
+}
+
 extension P256.Signing.PrivateKey: ByteBufferConvertible {
     public static func read(consuming buffer: inout ByteBuffer) throws -> Self {
         guard
@@ -35,10 +48,8 @@ extension P256.Signing.PrivateKey: ByteBufferConvertible {
         let start = buffer.writerIndex
         buffer.writeSSHString("nistp256")
         
-        let publicKey = self.publicKey
-        var publicKeyBuffer = ByteBuffer()
-        publicKeyBuffer.writeBytes(publicKey.x963Representation)
-        buffer.writeSSHString(&publicKeyBuffer)
+        // Write public key directly as SSH string
+        buffer.writeSSHString(publicKey.x963Representation)
         
         // Write private key as bignum (matching OpenSSH format)
         let privateKeyData = self.rawRepresentation
@@ -80,10 +91,8 @@ extension P384.Signing.PrivateKey: ByteBufferConvertible {
         let start = buffer.writerIndex
         buffer.writeSSHString("nistp384")
         
-        let publicKey = self.publicKey
-        var publicKeyBuffer = ByteBuffer()
-        publicKeyBuffer.writeBytes(publicKey.x963Representation)
-        buffer.writeSSHString(&publicKeyBuffer)
+        // Write public key directly as SSH string
+        buffer.writeSSHString(publicKey.x963Representation)
         
         // Write private key as bignum (matching OpenSSH format)
         let privateKeyData = self.rawRepresentation
@@ -125,10 +134,8 @@ extension P521.Signing.PrivateKey: ByteBufferConvertible {
         let start = buffer.writerIndex
         buffer.writeSSHString("nistp521")
         
-        let publicKey = self.publicKey
-        var publicKeyBuffer = ByteBuffer()
-        publicKeyBuffer.writeBytes(publicKey.x963Representation)
-        buffer.writeSSHString(&publicKeyBuffer)
+        // Write public key directly as SSH string
+        buffer.writeSSHString(publicKey.x963Representation)
         
         // Write private key as bignum (matching OpenSSH format)
         let privateKeyData = self.rawRepresentation
@@ -165,11 +172,7 @@ extension P256.Signing.PublicKey: ByteBufferConvertible {
     }
     
     public func write(to buffer: inout ByteBuffer) -> Int {
-        let start = buffer.writerIndex
-        var publicKeyBuffer = ByteBuffer()
-        publicKeyBuffer.writeBytes(self.x963Representation)
-        buffer.writeSSHString(&publicKeyBuffer)
-        return buffer.writerIndex - start
+        return writeECDSAPublicKey(to: &buffer, publicKeyData: self.x963Representation)
     }
 }
 
@@ -198,11 +201,7 @@ extension P384.Signing.PublicKey: ByteBufferConvertible {
     }
     
     public func write(to buffer: inout ByteBuffer) -> Int {
-        let start = buffer.writerIndex
-        var publicKeyBuffer = ByteBuffer()
-        publicKeyBuffer.writeBytes(self.x963Representation)
-        buffer.writeSSHString(&publicKeyBuffer)
-        return buffer.writerIndex - start
+        return writeECDSAPublicKey(to: &buffer, publicKeyData: self.x963Representation)
     }
 }
 
@@ -231,11 +230,7 @@ extension P521.Signing.PublicKey: ByteBufferConvertible {
     }
     
     public func write(to buffer: inout ByteBuffer) -> Int {
-        let start = buffer.writerIndex
-        var publicKeyBuffer = ByteBuffer()
-        publicKeyBuffer.writeBytes(self.x963Representation)
-        buffer.writeSSHString(&publicKeyBuffer)
-        return buffer.writerIndex - start
+        return writeECDSAPublicKey(to: &buffer, publicKeyData: self.x963Representation)
     }
 }
 
