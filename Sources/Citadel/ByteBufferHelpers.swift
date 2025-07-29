@@ -173,7 +173,7 @@ extension ByteBuffer {
     /// The data may include a leading zero byte that was added during serialization
     /// to ensure the number is interpreted as unsigned (when MSB was set).
     ///
-    /// - Returns: The bignum data, or nil if reading fails
+    /// - Returns: The raw bignum data as `Data`, or nil if reading fails
     mutating func readSSHBignum() -> Data? {
         guard let buffer = readSSHBuffer() else {
             return nil
@@ -192,7 +192,9 @@ extension ByteBuffer {
     /// of the first byte is set, the number could be misinterpreted as negative in two's
     /// complement representation. To prevent this, a zero byte is prepended when necessary.
     ///
-    /// - Parameter bignum: The BigInt value to write in SSH format
+    /// - Parameter bignum: The BigInt value to write in SSH format. The function handles
+    ///   the SSH requirement of prepending zero bytes for unsigned interpretation when
+    ///   necessary.
     mutating func writeSSHBignum(_ bignum: BigInt) {
         var data = bignum.serialize()
         
