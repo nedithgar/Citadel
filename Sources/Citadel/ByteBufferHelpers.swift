@@ -164,10 +164,17 @@ extension ByteBuffer {
         return slice
     }
     
+    /// Reads a BigInt from the buffer in SSH bignum format.
+    ///
+    /// The SSH bignum format consists of:
+    /// 1. A 4-byte unsigned integer indicating the length of the bignum data
+    /// 2. The bignum data itself, as a big-endian byte array
+    ///
+    /// The data may include a leading zero byte that was added during serialization
+    /// to ensure the number is interpreted as unsigned (when MSB was set).
+    ///
+    /// - Returns: The bignum data, or nil if reading fails
     mutating func readSSHBignum() -> Data? {
-        // SSH bignum format: a 4-byte length field followed by the bignum data.
-        // The data may have a leading zero byte if it was added during serialization
-        // to ensure the number is interpreted as unsigned (preventing MSB issues).
         guard let buffer = readSSHBuffer() else {
             return nil
         }
@@ -175,18 +182,25 @@ extension ByteBuffer {
         return buffer.getData(at: 0, length: buffer.readableBytes)
     }
     
+    /// Writes a BigInt to the buffer in SSH bignum format.
+    ///
+    /// The SSH bignum format consists of:
+    /// 1. A 4-byte unsigned integer indicating the length of the bignum data
+    /// 2. The bignum data itself, serialized as a big-endian byte array
+    ///
+    /// SSH bignums must always be interpreted as unsigned. If the most significant bit (MSB)
+    /// of the first byte is set, the number could be misinterpreted as negative in two's
+    /// complement representation. To prevent this, a zero byte is prepended when necessary.
+    ///
+    /// - Parameter bignum: The BigInt value to write in SSH format
     mutating func writeSSHBignum(_ bignum: BigInt) {
         var data = bignum.serialize()
         
-        // SSH bignum format requires that the number is always interpreted as unsigned.
-        // If the most significant bit (MSB) of the first byte is set, the number could
-        // be misinterpreted as negative in two's complement representation. To prevent
-        // this, a zero byte is prepended to the data, ensuring the MSB is not set.
+        // Prepend zero byte if MSB is set to ensure unsigned interpretation
         if !data.isEmpty && (data[0] & 0x80) != 0 {
             data.insert(0, at: 0)
         }
         
-        // Write the length of the bignum data as a 4-byte unsigned integer, followed by the data itself
         writeInteger(UInt32(data.count))
         writeBytes(data)
     }
