@@ -121,3 +121,72 @@ extension Insecure.RSA.PrivateKey: OpenSSHPrivateKey {
         self.init(privateExponent: privateExponent, publicExponent: publicExponent, modulus: modulus)
     }
 }
+
+extension P256.Signing.PrivateKey {
+    /// Creates a new P256 private key from an OpenSSH private key string.
+    /// - Parameters:
+    ///  - key: The OpenSSH private key string.
+    /// - decryptionKey: The key to decrypt the private key with, if any.
+    public init(sshECDSA data: Data, decryptionKey: Data? = nil) throws {
+        if let string = String(data: data, encoding: .utf8) {
+            try self.init(sshECDSA: string, decryptionKey: decryptionKey)
+        } else {
+            throw InvalidOpenSSHKey.invalidUTF8String
+        }
+    }
+    
+    /// Creates a new P256 private key from an OpenSSH private key string.
+    /// - Parameters:
+    ///  - key: The OpenSSH private key string.
+    /// - decryptionKey: The key to decrypt the private key with, if any.
+    public init(sshECDSA key: String, decryptionKey: Data? = nil) throws {
+        let privateKey = try OpenSSH.PrivateKey<P256.Signing.PrivateKey>(string: key, decryptionKey: decryptionKey).privateKey
+        try self.init(rawRepresentation: privateKey.rawRepresentation)
+    }
+}
+
+extension P384.Signing.PrivateKey {
+    /// Creates a new P384 private key from an OpenSSH private key string.
+    /// - Parameters:
+    ///  - key: The OpenSSH private key string.
+    /// - decryptionKey: The key to decrypt the private key with, if any.
+    public init(sshECDSA data: Data, decryptionKey: Data? = nil) throws {
+        if let string = String(data: data, encoding: .utf8) {
+            try self.init(sshECDSA: string, decryptionKey: decryptionKey)
+        } else {
+            throw InvalidOpenSSHKey.invalidUTF8String
+        }
+    }
+    
+    /// Creates a new P384 private key from an OpenSSH private key string.
+    /// - Parameters:
+    ///  - key: The OpenSSH private key string.
+    /// - decryptionKey: The key to decrypt the private key with, if any.
+    public init(sshECDSA key: String, decryptionKey: Data? = nil) throws {
+        let privateKey = try OpenSSH.PrivateKey<P384.Signing.PrivateKey>(string: key, decryptionKey: decryptionKey).privateKey
+        try self.init(rawRepresentation: privateKey.rawRepresentation)
+    }
+}
+
+extension P521.Signing.PrivateKey {
+    /// Creates a new P521 private key from an OpenSSH private key string.
+    /// - Parameters:
+    ///  - key: The OpenSSH private key string.
+    /// - decryptionKey: The key to decrypt the private key with, if any.
+    public init(sshECDSA data: Data, decryptionKey: Data? = nil) throws {
+        if let string = String(data: data, encoding: .utf8) {
+            try self.init(sshECDSA: string, decryptionKey: decryptionKey)
+        } else {
+            throw InvalidOpenSSHKey.invalidUTF8String
+        }
+    }
+    
+    /// Creates a new P521 private key from an OpenSSH private key string.
+    /// - Parameters:
+    ///  - key: The OpenSSH private key string.
+    /// - decryptionKey: The key to decrypt the private key with, if any.
+    public init(sshECDSA key: String, decryptionKey: Data? = nil) throws {
+        let privateKey = try OpenSSH.PrivateKey<P521.Signing.PrivateKey>(string: key, decryptionKey: decryptionKey).privateKey
+        try self.init(rawRepresentation: privateKey.rawRepresentation)
+    }
+}

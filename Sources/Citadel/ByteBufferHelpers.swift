@@ -1,5 +1,6 @@
 import NIO
 import Foundation
+import BigInt
 
 extension ByteBuffer {
     mutating func writeSFTPDate(_ date: Date) {
@@ -147,5 +148,25 @@ extension ByteBuffer {
         
         moveReaderIndex(forwardBy: 4 + Int(length))
         return slice
+    }
+    
+    mutating func readSSHBignum() -> Data? {
+        guard let buffer = readSSHBuffer() else {
+            return nil
+        }
+        
+        return buffer.getData(at: 0, length: buffer.readableBytes)
+    }
+    
+    mutating func writeSSHBignum(_ bignum: BigInt) {
+        var data = bignum.serialize()
+        
+        // SSH bignum format: prepend zero byte if MSB is set
+        if !data.isEmpty && (data[0] & 0x80) != 0 {
+            data.insert(0, at: 0)
+        }
+        
+        writeInteger(UInt32(data.count))
+        writeBytes(data)
     }
 }
