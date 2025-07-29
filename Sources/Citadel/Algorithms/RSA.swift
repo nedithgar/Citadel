@@ -167,46 +167,135 @@ extension Insecure.RSA {
     public final class PrivateKey: NIOSSHPrivateKeyProtocol {
         public static let keyPrefix = "ssh-rsa"
         
-        // Private Exponent
+        // Private Exponent d
         internal let privateExponent: UnsafeMutablePointer<BIGNUM>
         
-        // Public Exponent e
+        // Prime factors p and q
+        internal let p: UnsafeMutablePointer<BIGNUM>?
+        internal let q: UnsafeMutablePointer<BIGNUM>?
+        
+        // iqmp = q^-1 mod p
+        internal let iqmp: UnsafeMutablePointer<BIGNUM>?
+        
+        // Public key components
         internal let _publicKey: PublicKey
         
         public var publicKey: NIOSSHPublicKeyProtocol {
             _publicKey
         }
         
-        public init(privateExponent: UnsafeMutablePointer<BIGNUM>, publicExponent: UnsafeMutablePointer<BIGNUM>, modulus: UnsafeMutablePointer<BIGNUM>) {
+        public init(privateExponent: UnsafeMutablePointer<BIGNUM>, publicExponent: UnsafeMutablePointer<BIGNUM>, modulus: UnsafeMutablePointer<BIGNUM>, p: UnsafeMutablePointer<BIGNUM>? = nil, q: UnsafeMutablePointer<BIGNUM>? = nil, iqmp: UnsafeMutablePointer<BIGNUM>? = nil) {
             self.privateExponent = privateExponent
+            self.p = p
+            self.q = q
+            self.iqmp = iqmp
             self._publicKey = PublicKey(publicExponent: publicExponent, modulus: modulus)
         }
         
         deinit {
             CCryptoBoringSSL_BN_free(privateExponent)
+            if let p = p { CCryptoBoringSSL_BN_free(p) }
+            if let q = q { CCryptoBoringSSL_BN_free(q) }
+            if let iqmp = iqmp { CCryptoBoringSSL_BN_free(iqmp) }
         }
         
-        public init(bits: Int = 2047, publicExponent e: BigUInt = 65537) {
-            let privateKey = CCryptoBoringSSL_BN_new()!
-            let publicKey = CCryptoBoringSSL_BN_new()!
-            let group = CCryptoBoringSSL_BN_bin2bn(dh14p, dh14p.count, nil)!
-            let generator = CCryptoBoringSSL_BN_bin2bn(generator2, generator2.count, nil)!
-            let bignumContext = CCryptoBoringSSL_BN_CTX_new()
+        public init(bits: Int = 2048, publicExponent e: BigUInt = 65537) {
+            // Generate prime numbers p and q
+            let p = CCryptoBoringSSL_BN_new()!
+            let q = CCryptoBoringSSL_BN_new()!
+            let n = CCryptoBoringSSL_BN_new()!
+            let d = CCryptoBoringSSL_BN_new()!
+            let phi = CCryptoBoringSSL_BN_new()!
+            let p1 = CCryptoBoringSSL_BN_new()!
+            let q1 = CCryptoBoringSSL_BN_new()!
+            let iqmp = CCryptoBoringSSL_BN_new()!
+            let ctx = CCryptoBoringSSL_BN_CTX_new()!
             
-            CCryptoBoringSSL_BN_rand(privateKey, 256 * 8 - 1, 0, /*-1*/BN_RAND_BOTTOM_ANY)
-            CCryptoBoringSSL_BN_mod_exp(publicKey, generator, privateKey, group, bignumContext)
+            defer {
+                CCryptoBoringSSL_BN_free(phi)
+                CCryptoBoringSSL_BN_free(p1)
+                CCryptoBoringSSL_BN_free(q1)
+                CCryptoBoringSSL_BN_CTX_free(ctx)
+            }
+            
+            // Convert public exponent to BIGNUM
             let eBytes = Array(e.serialize())
-            let e = CCryptoBoringSSL_BN_bin2bn(eBytes, eBytes.count, nil)!
+            let eBN = CCryptoBoringSSL_BN_bin2bn(eBytes, eBytes.count, nil)!
             
-            CCryptoBoringSSL_BN_CTX_free(bignumContext)
-            CCryptoBoringSSL_BN_free(generator)
-            CCryptoBoringSSL_BN_free(group)
+            // Generate two prime numbers of half the key size
+            let primeSize = bits / 2
+            guard CCryptoBoringSSL_BN_generate_prime_ex(p, Int32(primeSize), 0, nil, nil, nil) == 1,
+                  CCryptoBoringSSL_BN_generate_prime_ex(q, Int32(primeSize), 0, nil, nil, nil) == 1 else {
+                fatalError("Failed to generate prime numbers")
+            }
             
-            self.privateExponent = privateKey
+            // Calculate n = p * q
+            guard CCryptoBoringSSL_BN_mul(n, p, q, ctx) == 1 else {
+                fatalError("Failed to calculate modulus")
+            }
+            
+            // Calculate phi(n) = (p-1) * (q-1)
+            guard CCryptoBoringSSL_BN_sub(p1, p, CCryptoBoringSSL_BN_value_one()) == 1,
+                  CCryptoBoringSSL_BN_sub(q1, q, CCryptoBoringSSL_BN_value_one()) == 1,
+                  CCryptoBoringSSL_BN_mul(phi, p1, q1, ctx) == 1 else {
+                fatalError("Failed to calculate phi")
+            }
+            
+            // Calculate d = e^-1 mod phi(n)
+            guard CCryptoBoringSSL_BN_mod_inverse(d, eBN, phi, ctx) != nil else {
+                fatalError("Failed to calculate private exponent")
+            }
+            
+            // Calculate iqmp = q^-1 mod p
+            guard CCryptoBoringSSL_BN_mod_inverse(iqmp, q, p, ctx) != nil else {
+                fatalError("Failed to calculate iqmp")
+            }
+            
+            self.privateExponent = d
+            self.p = p
+            self.q = q
+            self.iqmp = iqmp
             self._publicKey = .init(
-                publicExponent: e,
-                modulus: publicKey
+                publicExponent: eBN,
+                modulus: n
             )
+        }
+        
+        /// Calculates CRT parameters dmp1 and dmq1 from d, p, q
+        /// - Returns: Tuple of (dmp1, dmq1) where dmp1 = d mod (p-1) and dmq1 = d mod (q-1)
+        func calculateCRTParams() -> (dmp1: UnsafeMutablePointer<BIGNUM>?, dmq1: UnsafeMutablePointer<BIGNUM>?) {
+            guard let p = p, let q = q else { return (nil, nil) }
+            
+            let ctx = CCryptoBoringSSL_BN_CTX_new()!
+            defer { CCryptoBoringSSL_BN_CTX_free(ctx) }
+            
+            let p1 = CCryptoBoringSSL_BN_new()!
+            let q1 = CCryptoBoringSSL_BN_new()!
+            let dmp1 = CCryptoBoringSSL_BN_new()!
+            let dmq1 = CCryptoBoringSSL_BN_new()!
+            
+            defer {
+                CCryptoBoringSSL_BN_free(p1)
+                CCryptoBoringSSL_BN_free(q1)
+            }
+            
+            // Calculate p-1 and q-1
+            if CCryptoBoringSSL_BN_sub(p1, p, CCryptoBoringSSL_BN_value_one()) != 1 ||
+               CCryptoBoringSSL_BN_sub(q1, q, CCryptoBoringSSL_BN_value_one()) != 1 {
+                CCryptoBoringSSL_BN_free(dmp1)
+                CCryptoBoringSSL_BN_free(dmq1)
+                return (nil, nil)
+            }
+            
+            // Calculate dmp1 = d mod (p-1) and dmq1 = d mod (q-1)
+            if CCryptoBoringSSL_BN_nnmod(dmp1, privateExponent, p1, ctx) != 1 ||
+               CCryptoBoringSSL_BN_nnmod(dmq1, privateExponent, q1, ctx) != 1 {
+                CCryptoBoringSSL_BN_free(dmp1)
+                CCryptoBoringSSL_BN_free(dmq1)
+                return (nil, nil)
+            }
+            
+            return (dmp1, dmq1)
         }
         
         public func signature<D: DataProtocol>(for message: D) throws -> Signature {
@@ -228,6 +317,24 @@ extension Insecure.RSA {
                 privateExponent
             ) == 1 else {
                 throw CitadelError.signingError
+            }
+            
+            // Set factors and CRT params if available for performance
+            if let p = p, let q = q {
+                let pCopy = CCryptoBoringSSL_BN_new()!
+                let qCopy = CCryptoBoringSSL_BN_new()!
+                CCryptoBoringSSL_BN_copy(pCopy, p)
+                CCryptoBoringSSL_BN_copy(qCopy, q)
+                CCryptoBoringSSL_RSA_set0_factors(context, pCopy, qCopy)
+                
+                if let iqmp = iqmp {
+                    let (dmp1, dmq1) = calculateCRTParams()
+                    if let dmp1 = dmp1, let dmq1 = dmq1 {
+                        let iqmpCopy = CCryptoBoringSSL_BN_new()!
+                        CCryptoBoringSSL_BN_copy(iqmpCopy, iqmp)
+                        CCryptoBoringSSL_RSA_set0_crt_params(context, dmp1, dmq1, iqmpCopy)
+                    }
+                }
             }
             
             let hash = Array(Insecure.SHA1.hash(data: message))

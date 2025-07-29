@@ -40,24 +40,31 @@ private func writeECDSAPublicKey(to buffer: inout ByteBuffer, curveName: String?
 /// - Returns: The processed private key data with the correct size
 /// - Throws: `InvalidOpenSSHKey.invalidLayout` if the data size is invalid
 private func processECDSAPrivateKeyData(_ privateKeyData: Data, expectedKeySize: Int) throws -> Data {
-    // Check if we have the expected size with a leading zero byte
+    // SSH bignums may have a leading zero byte to ensure they're treated as positive
     if privateKeyData.count == expectedKeySize + 1 && privateKeyData[0] == 0 {
         // Remove the leading zero byte
         return privateKeyData.dropFirst()
     } else if privateKeyData.count == expectedKeySize {
         // Already the correct size
         return privateKeyData
+    } else if privateKeyData.count < expectedKeySize {
+        // Pad with leading zeros if too short
+        let padding = Data(repeating: 0, count: expectedKeySize - privateKeyData.count)
+        return padding + privateKeyData
     } else {
-        // Invalid size
+        // Invalid size - too large
         throw InvalidOpenSSHKey.invalidLayout
     }
 }
 
 extension P256.Signing.PrivateKey: ByteBufferConvertible {
     public static func read(consuming buffer: inout ByteBuffer) throws -> Self {
+        // For ECDSA, the private key section contains:
+        // 1. Curve name and public key (for non-cert keys)
+        // 2. Private key exponent as a bignum
         guard
             let curveName = buffer.readSSHString(),
-            let _ = buffer.readSSHBuffer(), // public key - we don't need it for reconstruction
+            let _ = buffer.readSSHString(), // public key - we don't need it for reconstruction
             let privateKeyData = buffer.readSSHBignum()
         else {
             throw InvalidOpenSSHKey.invalidLayout
@@ -76,13 +83,15 @@ extension P256.Signing.PrivateKey: ByteBufferConvertible {
     public func write(to buffer: inout ByteBuffer) -> Int {
         let start = buffer.writerIndex
         
-        // Write curve name and public key
+        // For ECDSA, the private key section contains:
+        // 1. Curve name and public key (for non-cert keys)
+        // 2. Private key exponent as a bignum
         writeECDSAPublicKey(to: &buffer, curveName: "nistp256", publicKeyData: publicKey.x963Representation)
         
-        // Write private key as bignum (matching OpenSSH format)
+        // Write private key as bignum - SSH bignum format preserves all bytes
         let privateKeyData = self.rawRepresentation
-        let bignum = BigInt(privateKeyData)
-        buffer.writeSSHBignum(bignum)
+        buffer.writeInteger(UInt32(privateKeyData.count))
+        buffer.writeBytes(privateKeyData)
         
         return buffer.writerIndex - start
     }
@@ -90,9 +99,12 @@ extension P256.Signing.PrivateKey: ByteBufferConvertible {
 
 extension P384.Signing.PrivateKey: ByteBufferConvertible {
     public static func read(consuming buffer: inout ByteBuffer) throws -> Self {
+        // For ECDSA, the private key section contains:
+        // 1. Curve name and public key (for non-cert keys)
+        // 2. Private key exponent as a bignum
         guard
             let curveName = buffer.readSSHString(),
-            let _ = buffer.readSSHBuffer(), // public key - we don't need it for reconstruction
+            let _ = buffer.readSSHString(), // public key - we don't need it for reconstruction
             let privateKeyData = buffer.readSSHBignum()
         else {
             throw InvalidOpenSSHKey.invalidLayout
@@ -111,13 +123,15 @@ extension P384.Signing.PrivateKey: ByteBufferConvertible {
     public func write(to buffer: inout ByteBuffer) -> Int {
         let start = buffer.writerIndex
         
-        // Write curve name and public key
+        // For ECDSA, the private key section contains:
+        // 1. Curve name and public key (for non-cert keys)
+        // 2. Private key exponent as a bignum
         writeECDSAPublicKey(to: &buffer, curveName: "nistp384", publicKeyData: publicKey.x963Representation)
         
-        // Write private key as bignum (matching OpenSSH format)
+        // Write private key as bignum - SSH bignum format preserves all bytes
         let privateKeyData = self.rawRepresentation
-        let bignum = BigInt(privateKeyData)
-        buffer.writeSSHBignum(bignum)
+        buffer.writeInteger(UInt32(privateKeyData.count))
+        buffer.writeBytes(privateKeyData)
         
         return buffer.writerIndex - start
     }
@@ -125,9 +139,12 @@ extension P384.Signing.PrivateKey: ByteBufferConvertible {
 
 extension P521.Signing.PrivateKey: ByteBufferConvertible {
     public static func read(consuming buffer: inout ByteBuffer) throws -> Self {
+        // For ECDSA, the private key section contains:
+        // 1. Curve name and public key (for non-cert keys)
+        // 2. Private key exponent as a bignum
         guard
             let curveName = buffer.readSSHString(),
-            let _ = buffer.readSSHBuffer(), // public key - we don't need it for reconstruction
+            let _ = buffer.readSSHString(), // public key - we don't need it for reconstruction
             let privateKeyData = buffer.readSSHBignum()
         else {
             throw InvalidOpenSSHKey.invalidLayout
@@ -146,13 +163,15 @@ extension P521.Signing.PrivateKey: ByteBufferConvertible {
     public func write(to buffer: inout ByteBuffer) -> Int {
         let start = buffer.writerIndex
         
-        // Write curve name and public key
+        // For ECDSA, the private key section contains:
+        // 1. Curve name and public key (for non-cert keys)
+        // 2. Private key exponent as a bignum
         writeECDSAPublicKey(to: &buffer, curveName: "nistp521", publicKeyData: publicKey.x963Representation)
         
-        // Write private key as bignum (matching OpenSSH format)
+        // Write private key as bignum - SSH bignum format preserves all bytes
         let privateKeyData = self.rawRepresentation
-        let bignum = BigInt(privateKeyData)
-        buffer.writeSSHBignum(bignum)
+        buffer.writeInteger(UInt32(privateKeyData.count))
+        buffer.writeBytes(privateKeyData)
         
         return buffer.writerIndex - start
     }
@@ -161,7 +180,8 @@ extension P521.Signing.PrivateKey: ByteBufferConvertible {
 // Public key types for ECDSA
 extension P256.Signing.PublicKey: ByteBufferConvertible {
     public static func read(consuming buffer: inout ByteBuffer) throws -> Self {
-        // First read the curve name
+        // When called from OpenSSH.PrivateKey parsing, the key type has already been consumed
+        // We expect to read curve name and EC point
         guard let curveName = buffer.readSSHString() else {
             throw InvalidOpenSSHKey.invalidLayout
         }
@@ -170,12 +190,11 @@ extension P256.Signing.PublicKey: ByteBufferConvertible {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        // Then read the EC point data
-        guard let pointData = buffer.readSSHBuffer() else {
+        // Then read the EC point data as SSH string (not buffer)
+        guard let pointBytes = buffer.readSSHData() else {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        let pointBytes = pointData.getBytes(at: 0, length: pointData.readableBytes) ?? []
         guard pointBytes.first == uncompressedPointPrefix else { // Uncompressed point
             throw InvalidOpenSSHKey.invalidLayout
         }
@@ -184,13 +203,14 @@ extension P256.Signing.PublicKey: ByteBufferConvertible {
     }
     
     public func write(to buffer: inout ByteBuffer) -> Int {
-        return writeECDSAPublicKey(to: &buffer, publicKeyData: self.x963Representation)
+        return writeECDSAPublicKey(to: &buffer, curveName: "nistp256", publicKeyData: self.x963Representation)
     }
 }
 
 extension P384.Signing.PublicKey: ByteBufferConvertible {
     public static func read(consuming buffer: inout ByteBuffer) throws -> Self {
-        // First read the curve name
+        // When called from OpenSSH.PrivateKey parsing, the key type has already been consumed
+        // We expect to read curve name and EC point
         guard let curveName = buffer.readSSHString() else {
             throw InvalidOpenSSHKey.invalidLayout
         }
@@ -199,12 +219,11 @@ extension P384.Signing.PublicKey: ByteBufferConvertible {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        // Then read the EC point data
-        guard let pointData = buffer.readSSHBuffer() else {
+        // Then read the EC point data as SSH string (not buffer)
+        guard let pointBytes = buffer.readSSHData() else {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        let pointBytes = pointData.getBytes(at: 0, length: pointData.readableBytes) ?? []
         guard pointBytes.first == uncompressedPointPrefix else { // Uncompressed point
             throw InvalidOpenSSHKey.invalidLayout
         }
@@ -213,13 +232,14 @@ extension P384.Signing.PublicKey: ByteBufferConvertible {
     }
     
     public func write(to buffer: inout ByteBuffer) -> Int {
-        return writeECDSAPublicKey(to: &buffer, publicKeyData: self.x963Representation)
+        return writeECDSAPublicKey(to: &buffer, curveName: "nistp384", publicKeyData: self.x963Representation)
     }
 }
 
 extension P521.Signing.PublicKey: ByteBufferConvertible {
     public static func read(consuming buffer: inout ByteBuffer) throws -> Self {
-        // First read the curve name
+        // When called from OpenSSH.PrivateKey parsing, the key type has already been consumed
+        // We expect to read curve name and EC point
         guard let curveName = buffer.readSSHString() else {
             throw InvalidOpenSSHKey.invalidLayout
         }
@@ -228,12 +248,11 @@ extension P521.Signing.PublicKey: ByteBufferConvertible {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        // Then read the EC point data
-        guard let pointData = buffer.readSSHBuffer() else {
+        // Then read the EC point data as SSH string (not buffer)
+        guard let pointBytes = buffer.readSSHData() else {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        let pointBytes = pointData.getBytes(at: 0, length: pointData.readableBytes) ?? []
         guard pointBytes.first == uncompressedPointPrefix else { // Uncompressed point
             throw InvalidOpenSSHKey.invalidLayout
         }
@@ -242,7 +261,7 @@ extension P521.Signing.PublicKey: ByteBufferConvertible {
     }
     
     public func write(to buffer: inout ByteBuffer) -> Int {
-        return writeECDSAPublicKey(to: &buffer, publicKeyData: self.x963Representation)
+        return writeECDSAPublicKey(to: &buffer, curveName: "nistp521", publicKeyData: self.x963Representation)
     }
 }
 
@@ -253,6 +272,34 @@ extension P256.Signing.PrivateKey: OpenSSHPrivateKey {
     public static var publicKeyPrefix: String { "ecdsa-sha2-nistp256" }
     public static var privateKeyPrefix: String { "ecdsa-sha2-nistp256" }
     public static var keyType: OpenSSH.KeyType { .ecdsaP256 }
+    public static var wrapPublicKeyInCompositeString: Bool { false }
+    
+    public func getPublicKey() -> P256.Signing.PublicKey {
+        self.publicKey
+    }
+}
+
+public extension P256.Signing.PrivateKey {
+    /// Creates a new OpenSSH formatted private key
+    /// - Parameters:
+    ///   - comment: Optional comment to include in the key
+    ///   - passphrase: Optional passphrase to encrypt the key
+    ///   - cipher: Cipher to use for encryption (default: "none")
+    ///   - rounds: Number of BCrypt rounds for key derivation (default: 16)
+    /// - Returns: OpenSSH formatted private key string
+    func makeSSHRepresentation(
+        comment: String = "",
+        passphrase: String? = nil,
+        cipher: String = "none",
+        rounds: Int = 16
+    ) throws -> String {
+        try (self as any OpenSSHPrivateKey).makeSSHRepresentation(
+            comment: comment,
+            passphrase: passphrase,
+            cipher: cipher,
+            rounds: rounds
+        )
+    }
 }
 
 extension P384.Signing.PrivateKey: OpenSSHPrivateKey {
@@ -261,6 +308,34 @@ extension P384.Signing.PrivateKey: OpenSSHPrivateKey {
     public static var publicKeyPrefix: String { "ecdsa-sha2-nistp384" }
     public static var privateKeyPrefix: String { "ecdsa-sha2-nistp384" }
     public static var keyType: OpenSSH.KeyType { .ecdsaP384 }
+    public static var wrapPublicKeyInCompositeString: Bool { false }
+    
+    public func getPublicKey() -> P384.Signing.PublicKey {
+        self.publicKey
+    }
+}
+
+public extension P384.Signing.PrivateKey {
+    /// Creates a new OpenSSH formatted private key
+    /// - Parameters:
+    ///   - comment: Optional comment to include in the key
+    ///   - passphrase: Optional passphrase to encrypt the key
+    ///   - cipher: Cipher to use for encryption (default: "none")
+    ///   - rounds: Number of BCrypt rounds for key derivation (default: 16)
+    /// - Returns: OpenSSH formatted private key string
+    func makeSSHRepresentation(
+        comment: String = "",
+        passphrase: String? = nil,
+        cipher: String = "none",
+        rounds: Int = 16
+    ) throws -> String {
+        try (self as any OpenSSHPrivateKey).makeSSHRepresentation(
+            comment: comment,
+            passphrase: passphrase,
+            cipher: cipher,
+            rounds: rounds
+        )
+    }
 }
 
 extension P521.Signing.PrivateKey: OpenSSHPrivateKey {
@@ -269,4 +344,32 @@ extension P521.Signing.PrivateKey: OpenSSHPrivateKey {
     public static var publicKeyPrefix: String { "ecdsa-sha2-nistp521" }
     public static var privateKeyPrefix: String { "ecdsa-sha2-nistp521" }
     public static var keyType: OpenSSH.KeyType { .ecdsaP521 }
+    public static var wrapPublicKeyInCompositeString: Bool { false }
+    
+    public func getPublicKey() -> P521.Signing.PublicKey {
+        self.publicKey
+    }
+}
+
+public extension P521.Signing.PrivateKey {
+    /// Creates a new OpenSSH formatted private key
+    /// - Parameters:
+    ///   - comment: Optional comment to include in the key
+    ///   - passphrase: Optional passphrase to encrypt the key
+    ///   - cipher: Cipher to use for encryption (default: "none")
+    ///   - rounds: Number of BCrypt rounds for key derivation (default: 16)
+    /// - Returns: OpenSSH formatted private key string
+    func makeSSHRepresentation(
+        comment: String = "",
+        passphrase: String? = nil,
+        cipher: String = "none",
+        rounds: Int = 16
+    ) throws -> String {
+        try (self as any OpenSSHPrivateKey).makeSSHRepresentation(
+            comment: comment,
+            passphrase: passphrase,
+            cipher: cipher,
+            rounds: rounds
+        )
+    }
 }

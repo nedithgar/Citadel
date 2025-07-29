@@ -5,6 +5,7 @@ import NIO
 import Crypto
 import CCitadelBcrypt
 import NIOSSH
+import Security
 
 // Noteable links:
 // https://dnaeon.github.io/openssh-private-key-binary-format/
@@ -20,6 +21,16 @@ protocol OpenSSHPrivateKey: ByteBufferConvertible {
     static var keyType: OpenSSH.KeyType { get }
     
     associatedtype PublicKey: ByteBufferConvertible
+    
+    func getPublicKey() -> PublicKey
+    
+    /// Whether to wrap public key data in a composite SSH string (default: true for Ed25519, false for ECDSA)
+    static var wrapPublicKeyInCompositeString: Bool { get }
+}
+
+extension OpenSSHPrivateKey {
+    // Default implementation - Ed25519 style with wrapping
+    static var wrapPublicKeyInCompositeString: Bool { true }
 }
 
 extension Insecure.RSA.PrivateKey: ByteBufferConvertible {
@@ -32,11 +43,11 @@ extension Insecure.RSA.PrivateKey: ByteBufferConvertible {
             let dLength = buffer.readInteger(as: UInt32.self),
             let dBytes = buffer.readBytes(length: Int(dLength)),
             let iqmpLength = buffer.readInteger(as: UInt32.self),
-            let _ = buffer.readData(length: Int(iqmpLength)),
+            let iqmpBytes = buffer.readBytes(length: Int(iqmpLength)),
             let pLength = buffer.readInteger(as: UInt32.self),
-            let _ = buffer.readData(length: Int(pLength)),
+            let pBytes = buffer.readBytes(length: Int(pLength)),
             let qLength = buffer.readInteger(as: UInt32.self),
-            let _ = buffer.readData(length: Int(qLength))
+            let qBytes = buffer.readBytes(length: Int(qLength))
         else {
             throw InvalidOpenSSHKey.invalidLayout
         }
@@ -44,12 +55,61 @@ extension Insecure.RSA.PrivateKey: ByteBufferConvertible {
         let privateExponent = CCryptoBoringSSL_BN_bin2bn(dBytes, dBytes.count, nil)!
         let publicExponent = CCryptoBoringSSL_BN_bin2bn(eBytes, eBytes.count, nil)!
         let modulus = CCryptoBoringSSL_BN_bin2bn(nBytes, nBytes.count, nil)!
+        
+        // Read p, q, iqmp if they're not placeholder values
+        let p: UnsafeMutablePointer<BIGNUM>? = pLength > 0 && pBytes.contains(where: { $0 != 0 }) ? CCryptoBoringSSL_BN_bin2bn(pBytes, pBytes.count, nil) : nil
+        let q: UnsafeMutablePointer<BIGNUM>? = qLength > 0 && qBytes.contains(where: { $0 != 0 }) ? CCryptoBoringSSL_BN_bin2bn(qBytes, qBytes.count, nil) : nil
+        let iqmp: UnsafeMutablePointer<BIGNUM>? = iqmpLength > 0 && iqmpBytes.contains(where: { $0 != 0 }) ? CCryptoBoringSSL_BN_bin2bn(iqmpBytes, iqmpBytes.count, nil) : nil
 
-        return self.init(privateExponent: privateExponent, publicExponent: publicExponent, modulus: modulus)
+        return self.init(privateExponent: privateExponent, publicExponent: publicExponent, modulus: modulus, p: p, q: q, iqmp: iqmp)
     }
     
     func write(to buffer: inout ByteBuffer) -> Int {
-        0
+        let start = buffer.writerIndex
+        
+        // Write modulus (n)
+        var nBytes = [UInt8](repeating: 0, count: Int(CCryptoBoringSSL_BN_num_bytes(_publicKey.modulus)))
+        CCryptoBoringSSL_BN_bn2bin(_publicKey.modulus, &nBytes)
+        buffer.writeSSHBignum(BigInt(Data(nBytes)))
+        
+        // Write public exponent (e)
+        var eBytes = [UInt8](repeating: 0, count: Int(CCryptoBoringSSL_BN_num_bytes(_publicKey.publicExponent)))
+        CCryptoBoringSSL_BN_bn2bin(_publicKey.publicExponent, &eBytes)
+        buffer.writeSSHBignum(BigInt(Data(eBytes)))
+        
+        // Write private exponent (d)
+        var dBytes = [UInt8](repeating: 0, count: Int(CCryptoBoringSSL_BN_num_bytes(privateExponent)))
+        CCryptoBoringSSL_BN_bn2bin(privateExponent, &dBytes)
+        buffer.writeSSHBignum(BigInt(Data(dBytes)))
+        
+        // Write iqmp (inverse of q mod p)
+        if let iqmp = iqmp {
+            var iqmpBytes = [UInt8](repeating: 0, count: Int(CCryptoBoringSSL_BN_num_bytes(iqmp)))
+            CCryptoBoringSSL_BN_bn2bin(iqmp, &iqmpBytes)
+            buffer.writeSSHBignum(BigInt(Data(iqmpBytes)))
+        } else {
+            buffer.writeSSHBignum(BigInt(0))
+        }
+        
+        // Write p (first prime factor)
+        if let p = p {
+            var pBytes = [UInt8](repeating: 0, count: Int(CCryptoBoringSSL_BN_num_bytes(p)))
+            CCryptoBoringSSL_BN_bn2bin(p, &pBytes)
+            buffer.writeSSHBignum(BigInt(Data(pBytes)))
+        } else {
+            buffer.writeSSHBignum(BigInt(0))
+        }
+        
+        // Write q (second prime factor)
+        if let q = q {
+            var qBytes = [UInt8](repeating: 0, count: Int(CCryptoBoringSSL_BN_num_bytes(q)))
+            CCryptoBoringSSL_BN_bn2bin(q, &qBytes)
+            buffer.writeSSHBignum(BigInt(Data(qBytes)))
+        } else {
+            buffer.writeSSHBignum(BigInt(0))
+        }
+        
+        return buffer.writerIndex - start
     }
 }
 
@@ -85,56 +145,183 @@ extension Curve25519.Signing.PrivateKey: ByteBufferConvertible {
             return n + buffer.writeData(self.publicKey.rawRepresentation)
         }
     }
-    
+}
+
+extension OpenSSHPrivateKey {
     /// Creates a new OpenSSH formatted private key
-    public func makeSSHRepresentation(comment: String = "") -> String {
+    /// - Parameters:
+    ///   - comment: Optional comment to include in the key
+    ///   - passphrase: Optional passphrase to encrypt the key
+    ///   - cipher: Cipher to use for encryption (default: "none")
+    ///   - rounds: Number of BCrypt rounds for key derivation (default: 16)
+    /// - Returns: OpenSSH formatted private key string
+    func makeSSHRepresentation(
+        comment: String = "",
+        passphrase: String? = nil,
+        cipher: String = "none",
+        rounds: Int = 16
+    ) throws -> String {
         let allocator = ByteBufferAllocator()
         
         var buffer = allocator.buffer(capacity: Int(UInt16.max))
         buffer.reserveCapacity(Int(UInt16.max))
         
+        // Write OpenSSH magic header
         buffer.writeString("openssh-key-v1")
         buffer.writeInteger(0x00 as UInt8)
         
-        buffer.writeSSHString("none") // cipher
-        buffer.writeSSHString("none") // kdf
-        buffer.writeSSHString([UInt8]()) // kdf options
+        // Determine cipher and KDF based on passphrase
+        let actualCipher: String
+        let kdfName: String
+        let kdfOptions: ByteBuffer
         
+        if let _ = passphrase {
+            actualCipher = cipher == "none" ? "aes256-ctr" : cipher
+            kdfName = "bcrypt"
+            
+            // Generate salt for BCrypt
+            var salt = [UInt8](repeating: 0, count: 16)
+            _ = SecRandomCopyBytes(kSecRandomDefault, 16, &salt)
+            
+            // Create KDF options buffer
+            var optionsBuffer = allocator.buffer(capacity: 32)
+            optionsBuffer.writeSSHString(salt)
+            optionsBuffer.writeInteger(UInt32(rounds))
+            kdfOptions = optionsBuffer
+        } else {
+            actualCipher = "none"
+            kdfName = "none"
+            kdfOptions = allocator.buffer(capacity: 0)
+        }
+        
+        buffer.writeSSHString(actualCipher)
+        buffer.writeSSHString(kdfName)
+        buffer.writeSSHString(kdfOptions.readableBytesView)
+        
+        // Number of keys (always 1)
         buffer.writeInteger(1 as UInt32)
         
+        // Write public key
         var publicKeyBuffer = allocator.buffer(capacity: Int(UInt8.max))
-        publicKeyBuffer.writeSSHString("ssh-ed25519")
-        publicKeyBuffer.writeCompositeSSHString { buffer in
-            publicKey.write(to: &buffer)
+        publicKeyBuffer.writeSSHString(Self.publicKeyPrefix)
+        if Self.wrapPublicKeyInCompositeString {
+            publicKeyBuffer.writeCompositeSSHString { buffer in
+                self.getPublicKey().write(to: &buffer)
+            }
+        } else {
+            _ = self.getPublicKey().write(to: &publicKeyBuffer)
         }
         buffer.writeSSHString(&publicKeyBuffer)
         
-        var privateKeyBuffer = allocator.buffer(capacity: Int(UInt8.max))
+        // Write private key
+        var privateKeyBuffer = allocator.buffer(capacity: Int(UInt16.max))
         
-        // checksum
+        // Write checksum
         let checksum = UInt32.random(in: .min ... .max)
         privateKeyBuffer.writeInteger(checksum)
         privateKeyBuffer.writeInteger(checksum)
         
-        privateKeyBuffer.writeSSHString("ssh-ed25519")
-        write(to: &privateKeyBuffer)
-        privateKeyBuffer.writeSSHString(comment) // comment
-        let neededBytes = UInt8(OpenSSH.Cipher.none.blockSize - (privateKeyBuffer.writerIndex % OpenSSH.Cipher.none.blockSize))
+        // Write key type and key data
+        privateKeyBuffer.writeSSHString(Self.privateKeyPrefix)
+        _ = write(to: &privateKeyBuffer)
+        privateKeyBuffer.writeSSHString(comment)
+        
+        // Add padding
+        let cipherEnum = OpenSSH.Cipher(rawValue: actualCipher) ?? .none
+        let neededBytes = UInt8(cipherEnum.blockSize - (privateKeyBuffer.writerIndex % cipherEnum.blockSize))
         if neededBytes > 0 {
             for i in 1...neededBytes {
                 privateKeyBuffer.writeInteger(i)
             }
         }
+        
+        // Encrypt if needed
+        if let passphrase = passphrase, kdfName == "bcrypt" {
+            // Parse KDF options to get salt
+            var optionsCopy = kdfOptions
+            guard var saltBuffer = optionsCopy.readSSHBuffer(),
+                  let saltBytes = saltBuffer.readBytes(length: saltBuffer.readableBytes) else {
+                throw OpenSSH.KeyError.cryptoError
+            }
+            
+            let kdf = OpenSSH.KDF.bcrypt(salt: ByteBuffer(bytes: saltBytes), iterations: UInt32(rounds))
+            
+            try kdf.withKeyAndIV(cipher: cipherEnum, basedOnDecryptionKey: passphrase.data(using: .utf8)) { key, iv in
+                try privateKeyBuffer.encryptAES(cipher: cipherEnum, key: key, iv: iv)
+            }
+        }
+        
         buffer.writeSSHString(&privateKeyBuffer)
         
+        // Convert to base64
         let base64 = buffer.readData(length: buffer.readableBytes)!.base64EncodedString()
         
+        // Format with PEM boundaries
         var string = "-----BEGIN OPENSSH PRIVATE KEY-----\n"
-        string += base64
-        string += "\n"
+        
+        // Split base64 into 70-character lines
+        var index = base64.startIndex
+        while index < base64.endIndex {
+            let endIndex = base64.index(index, offsetBy: 70, limitedBy: base64.endIndex) ?? base64.endIndex
+            string += base64[index..<endIndex]
+            string += "\n"
+            index = endIndex
+        }
+        
         string += "-----END OPENSSH PRIVATE KEY-----\n"
         
         return string
+    }
+}
+
+extension ByteBuffer {
+    /// Encrypts the buffer using AES in CTR mode
+    mutating func encryptAES(
+        cipher: OpenSSH.Cipher,
+        key: [UInt8],
+        iv: [UInt8]
+    ) throws {
+        let cipherPtr: OpaquePointer
+        switch cipher {
+        case .aes128ctr:
+            cipherPtr = CCryptoBoringSSL_EVP_aes_128_ctr()
+        case .aes256ctr:
+            cipherPtr = CCryptoBoringSSL_EVP_aes_256_ctr()
+        default:
+            return // No encryption needed
+        }
+        
+        let context = CCryptoBoringSSL_EVP_CIPHER_CTX_new()
+        defer { CCryptoBoringSSL_EVP_CIPHER_CTX_free(context) }
+        
+        guard CCryptoBoringSSL_EVP_CipherInit(
+            context,
+            cipherPtr,
+            key,
+            iv,
+            1 // 1 for encryption, 0 for decryption
+        ) == 1 else {
+            throw OpenSSH.KeyError.cryptoError
+        }
+        
+        try self.withUnsafeMutableReadableBytes { buffer in
+            var byteBufferPointer = buffer.bindMemory(to: UInt8.self).baseAddress!
+            try withUnsafeTemporaryAllocation(of: UInt8.self, capacity: 16) { encryptedBuffer in
+                for _ in 0..<buffer.count / 16 {
+                    guard CCryptoBoringSSL_EVP_Cipher(
+                        context,
+                        encryptedBuffer.baseAddress!,
+                        byteBufferPointer,
+                        16
+                    ) == 1 else {
+                        throw CitadelError.cryptographicError
+                    }
+                    
+                    byteBufferPointer.update(from: encryptedBuffer.baseAddress!, count: 16)
+                    byteBufferPointer += 16
+                }
+            }
+        }
     }
 }
 

@@ -182,6 +182,17 @@ extension ByteBuffer {
         return buffer.getData(at: 0, length: buffer.readableBytes)
     }
     
+    /// Reads SSH string data (length-prefixed binary data)
+    mutating func readSSHData() -> Data? {
+        guard
+            let length = readInteger(as: UInt32.self),
+            let data = readData(length: Int(length))
+        else {
+            return nil
+        }
+        return data
+    }
+    
     /// Writes a BigInt to the buffer in SSH bignum format.
     ///
     /// The SSH bignum format consists of:
