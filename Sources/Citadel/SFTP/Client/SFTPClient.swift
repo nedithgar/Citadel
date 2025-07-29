@@ -121,7 +121,7 @@ public final class SFTPClient: Sendable {
     /// ```
     public func listDirectory(
         atPath path: String
-    ) async throws -> [SFTPMessage.Name] {
+    ) async throws -> [SFTPPathComponent] {
         var path = path
         var oldPath: String
 
@@ -140,7 +140,7 @@ public final class SFTPClient: Sendable {
             throw SFTPError.invalidResponse
         }
         
-        var names = [SFTPMessage.Name]()
+        var allComponents = [SFTPPathComponent]()
         var response = try await sendRequest(
             .readdir(
                 .init(
@@ -151,7 +151,7 @@ public final class SFTPClient: Sendable {
         )
         
         while case .name(let name) = response {
-            names.append(name)
+            allComponents.append(contentsOf: name.components)
             response = try await sendRequest(
                 .readdir(
                     .init(
@@ -162,7 +162,7 @@ public final class SFTPClient: Sendable {
             )
         }
         
-        return names
+        return allComponents
     }
     
     /// Get the attributes of a file on the SFTP server.
