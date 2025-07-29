@@ -525,4 +525,41 @@ final class KeyTests: XCTestCase {
         XCTAssertNotNil(parsedKey)
         XCTAssertNotNil(decryptedKey)
     }
+    
+    func testRSASignatureWithDifferentHashAlgorithms() throws {
+        // Generate RSA key pair
+        let privateKey = Insecure.RSA.PrivateKey(bits: 2048)
+        let publicKey = privateKey.publicKey as! Insecure.RSA.PublicKey
+        
+        let message = "Hello, RSA with modern hash algorithms!".data(using: .utf8)!
+        
+        // Test SHA1 (legacy)
+        let sha1Signature = try privateKey.signature(for: message, algorithm: .sha1)
+        XCTAssertEqual(sha1Signature.algorithm, .sha1)
+        XCTAssertTrue(publicKey.isValidSignature(sha1Signature, for: message))
+        
+        // Test SHA256
+        let sha256Signature = try privateKey.signature(for: message, algorithm: .sha256)
+        XCTAssertEqual(sha256Signature.algorithm, .sha256)
+        XCTAssertTrue(publicKey.isValidSignature(sha256Signature, for: message))
+        
+        // Test SHA512
+        let sha512Signature = try privateKey.signature(for: message, algorithm: .sha512)
+        XCTAssertEqual(sha512Signature.algorithm, .sha512)
+        XCTAssertTrue(publicKey.isValidSignature(sha512Signature, for: message))
+        
+        // Test cross-validation fails (wrong algorithm)
+        XCTAssertFalse(publicKey.isValidSignature(
+            Insecure.RSA.Signature(rawRepresentation: sha256Signature.rawRepresentation, algorithm: .sha1),
+            for: message
+        ))
+        
+        // Test signature serialization and deserialization
+        var buffer = ByteBuffer()
+        _ = sha256Signature.write(to: &buffer)
+        let deserializedSig = try Insecure.RSA.Signature.read(from: &buffer)
+        XCTAssertEqual(deserializedSig.algorithm, .sha256)
+        XCTAssertEqual(deserializedSig.rawRepresentation, sha256Signature.rawRepresentation)
+        XCTAssertTrue(publicKey.isValidSignature(deserializedSig, for: message))
+    }
 }

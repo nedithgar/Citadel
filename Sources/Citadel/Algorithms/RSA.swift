@@ -7,7 +7,26 @@ import Foundation
 import Crypto
 
 extension Insecure {
-    public enum RSA {}
+    public enum RSA {
+        /// Supported RSA signature hash algorithms
+        public enum SignatureHashAlgorithm: String {
+            case sha1 = "ssh-rsa"
+            case sha256 = "rsa-sha2-256"
+            case sha512 = "rsa-sha2-512"
+            
+            /// Get the corresponding NID for BoringSSL
+            var nid: Int32 {
+                switch self {
+                case .sha1:
+                    return NID_sha1
+                case .sha256:
+                    return NID_sha256
+                case .sha512:
+                    return NID_sha512
+                }
+            }
+        }
+    }
 }
 
 extension Insecure.RSA {
@@ -73,17 +92,34 @@ extension Insecure.RSA {
                 return false
             }
             
-            var clientSignature = [UInt8](repeating: 0, count: 20)
-            let digest = Array(digest)
-            CCryptoBoringSSL_SHA1(digest, digest.count, &clientSignature)
+            // Hash the message based on the signature algorithm
+            let messageData = Array(digest)
+            let hashedMessage: [UInt8]
+            let hashLength: Int
             
-            let signature = Array(signature.rawRepresentation)
+            switch signature.algorithm {
+            case .sha1:
+                var hash = [UInt8](repeating: 0, count: 20)
+                CCryptoBoringSSL_SHA1(messageData, messageData.count, &hash)
+                hashedMessage = hash
+                hashLength = 20
+            case .sha256:
+                let hash = SHA256.hash(data: digest)
+                hashedMessage = Array(hash)
+                hashLength = 32
+            case .sha512:
+                let hash = SHA512.hash(data: digest)
+                hashedMessage = Array(hash)
+                hashLength = 64
+            }
+            
+            let signatureBytes = Array(signature.rawRepresentation)
             return CCryptoBoringSSL_RSA_verify(
-                NID_sha1,
-                clientSignature,
-                20,
-                signature,
-                signature.count,
+                signature.algorithm.nid,
+                hashedMessage,
+                hashLength,
+                signatureBytes,
+                signatureBytes.count,
                 context
             ) == 1
         }
@@ -141,9 +177,11 @@ extension Insecure.RSA {
         public static let signaturePrefix = "ssh-rsa"
         
         public let rawRepresentation: Data
+        public let algorithm: SignatureHashAlgorithm
         
-        public init<D>(rawRepresentation: D) where D : DataProtocol {
+        public init<D>(rawRepresentation: D, algorithm: SignatureHashAlgorithm = .sha1) where D : DataProtocol {
             self.rawRepresentation = Data(rawRepresentation)
+            self.algorithm = algorithm
         }
         
         public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
@@ -151,16 +189,33 @@ extension Insecure.RSA {
         }
         
         public func write(to buffer: inout ByteBuffer) -> Int {
-            // For SSH-RSA, the key format is the signature without lengths or paddings
-            return buffer.writeSSHString(rawRepresentation)
+            var writtenBytes = 0
+            // Write the algorithm identifier first
+            writtenBytes += buffer.writeSSHString(algorithm.rawValue.utf8)
+            // Then write the signature bytes
+            writtenBytes += buffer.writeSSHString(rawRepresentation)
+            return writtenBytes
         }
         
         public static func read(from buffer: inout ByteBuffer) throws -> Signature {
-            guard let buffer = buffer.readSSHBuffer() else {
+            // Read the algorithm identifier
+            guard let algorithmString = buffer.readSSHString() else {
+                throw RSAError(message: "Missing signature algorithm identifier")
+            }
+            
+            guard let algorithm = SignatureHashAlgorithm(rawValue: algorithmString) else {
+                throw RSAError(message: "Unsupported signature algorithm: \(algorithmString)")
+            }
+            
+            // Read the signature data
+            guard let signatureData = buffer.readSSHBuffer() else {
                 throw RSAError(message: "Invalid signature format")
             }
             
-            return Signature(rawRepresentation: buffer.getData(at: 0, length: buffer.readableBytes)!)
+            return Signature(
+                rawRepresentation: signatureData.getData(at: 0, length: signatureData.readableBytes)!,
+                algorithm: algorithm
+            )
         }
     }
     
@@ -298,7 +353,7 @@ extension Insecure.RSA {
             return (dmp1, dmq1)
         }
         
-        public func signature<D: DataProtocol>(for message: D) throws -> Signature {
+        public func signature<D: DataProtocol>(for message: D, algorithm: SignatureHashAlgorithm = .sha1) throws -> Signature {
             let context = CCryptoBoringSSL_RSA_new()
             defer { CCryptoBoringSSL_RSA_free(context) }
 
@@ -337,14 +392,24 @@ extension Insecure.RSA {
                 }
             }
             
-            let hash = Array(Insecure.SHA1.hash(data: message))
+            // Hash the message based on the selected algorithm
+            let hashedMessage: [UInt8]
+            switch algorithm {
+            case .sha1:
+                hashedMessage = Array(Insecure.SHA1.hash(data: message))
+            case .sha256:
+                hashedMessage = Array(SHA256.hash(data: message))
+            case .sha512:
+                hashedMessage = Array(SHA512.hash(data: message))
+            }
+            
             let out = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
             defer { out.deallocate() }
             var outLength: UInt32 = 4096
             let result = CCryptoBoringSSL_RSA_sign(
-                NID_sha1,
-                hash,
-                Int(hash.count),
+                algorithm.nid,
+                hashedMessage,
+                Int(hashedMessage.count),
                 out,
                 &outLength,
                 context
@@ -354,7 +419,7 @@ extension Insecure.RSA {
                 throw CitadelError.signingError
             }
             
-            return Signature(rawRepresentation: Data(bytes: out, count: Int(outLength)))
+            return Signature(rawRepresentation: Data(bytes: out, count: Int(outLength)), algorithm: algorithm)
         }
         
         public func signature<D>(for data: D) throws -> NIOSSHSignatureProtocol where D : DataProtocol {
