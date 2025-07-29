@@ -1,5 +1,6 @@
 import NIO
 import Foundation
+import BigInt
 
 extension ByteBuffer {
     mutating func writeSFTPDate(_ date: Date) {
@@ -125,6 +126,20 @@ extension ByteBuffer {
         setInteger(UInt32(writerIndex - oldWriterIndex - 4), at: oldWriterIndex)
     }
     
+    @discardableResult
+    mutating func writeSSHString(_ data: Data) -> Int {
+        let oldWriterIndex = writerIndex
+        writeInteger(UInt32(data.count))
+        writeBytes(data)
+        return writerIndex - oldWriterIndex
+    }
+    
+    @discardableResult
+    mutating func writeSSHString<S: Sequence>(_ bytes: S) -> Int where S.Element == UInt8 {
+        let data = Data(bytes)
+        return writeSSHString(data)
+    }
+    
     mutating func readSSHString() -> String? {
         guard
             let length = getInteger(at: self.readerIndex, as: UInt32.self),
@@ -147,5 +162,48 @@ extension ByteBuffer {
         
         moveReaderIndex(forwardBy: 4 + Int(length))
         return slice
+    }
+    
+    /// Reads a BigInt from the buffer in SSH bignum format.
+    ///
+    /// The SSH bignum format consists of:
+    /// 1. A 4-byte unsigned integer indicating the length of the bignum data
+    /// 2. The bignum data itself, as a big-endian byte array
+    ///
+    /// The data may include a leading zero byte that was added during serialization
+    /// to ensure the number is interpreted as unsigned (when MSB was set).
+    ///
+    /// - Returns: The raw bignum data as `Data`, or nil if reading fails
+    mutating func readSSHBignum() -> Data? {
+        guard let buffer = readSSHBuffer() else {
+            return nil
+        }
+        
+        return buffer.getData(at: 0, length: buffer.readableBytes)
+    }
+    
+    /// Writes a BigInt to the buffer in SSH bignum format.
+    ///
+    /// The SSH bignum format consists of:
+    /// 1. A 4-byte unsigned integer indicating the length of the bignum data
+    /// 2. The bignum data itself, serialized as a big-endian byte array
+    ///
+    /// SSH bignums must always be interpreted as unsigned. If the most significant bit (MSB)
+    /// of the first byte is set, the number could be misinterpreted as negative in two's
+    /// complement representation. To prevent this, a zero byte is prepended when necessary.
+    ///
+    /// - Parameter bignum: The BigInt value to write in SSH format. The function handles
+    ///   the SSH requirement of prepending zero bytes for unsigned interpretation when
+    ///   necessary.
+    mutating func writeSSHBignum(_ bignum: BigInt) {
+        var data = bignum.serialize()
+        
+        // Prepend zero byte if MSB is set to ensure unsigned interpretation
+        if !data.isEmpty && (data[0] & 0x80) != 0 {
+            data.insert(0, at: 0)
+        }
+        
+        writeInteger(UInt32(data.count))
+        writeBytes(data)
     }
 }
