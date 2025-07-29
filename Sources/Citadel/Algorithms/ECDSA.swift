@@ -4,6 +4,12 @@ import _CryptoExtras
 import NIOCore
 import BigInt
 
+// MARK: - Constants
+
+/// ECDSA point format identifier for uncompressed points
+/// In the x963 representation, uncompressed points start with 0x04
+private let uncompressedPointPrefix: UInt8 = 0x04
+
 // MARK: - Helper Functions
 
 /// Writes ECDSA public key data to a buffer in SSH format
@@ -22,6 +28,31 @@ private func writeECDSAPublicKey(to buffer: inout ByteBuffer, curveName: String?
     return buffer.writerIndex - start
 }
 
+/// Processes ECDSA private key data by validating its size and removing the leading zero byte if present.
+/// 
+/// SSH bignum format may include a leading zero byte to ensure the number is interpreted as unsigned.
+/// This function removes that zero byte if present and validates that the resulting data matches
+/// the expected key size for the curve.
+///
+/// - Parameters:
+///   - privateKeyData: The raw private key data from SSH format
+///   - expectedKeySize: The expected size in bytes for the specific curve (32 for P-256, 48 for P-384, 66 for P-521)
+/// - Returns: The processed private key data with the correct size
+/// - Throws: `InvalidOpenSSHKey.invalidLayout` if the data size is invalid
+private func processECDSAPrivateKeyData(_ privateKeyData: Data, expectedKeySize: Int) throws -> Data {
+    // Check if we have the expected size with a leading zero byte
+    if privateKeyData.count == expectedKeySize + 1 && privateKeyData[0] == 0 {
+        // Remove the leading zero byte
+        return privateKeyData.dropFirst()
+    } else if privateKeyData.count == expectedKeySize {
+        // Already the correct size
+        return privateKeyData
+    } else {
+        // Invalid size
+        throw InvalidOpenSSHKey.invalidLayout
+    }
+}
+
 extension P256.Signing.PrivateKey: ByteBufferConvertible {
     public static func read(consuming buffer: inout ByteBuffer) throws -> Self {
         guard
@@ -36,15 +67,8 @@ extension P256.Signing.PrivateKey: ByteBufferConvertible {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        // ECDSA private keys are stored as bignums in OpenSSH format
-        // P256 private keys should be exactly 32 bytes (may have leading zero)
-        guard privateKeyData.count >= 32 && privateKeyData.count <= 33 else {
-            throw InvalidOpenSSHKey.invalidLayout
-        }
-        
-        // Remove leading zero if present
-        let keyData = privateKeyData.count == 33 && privateKeyData[0] == 0 ? 
-            privateKeyData.dropFirst() : privateKeyData
+        // Process the private key data to validate size and remove leading zero if present
+        let keyData = try processECDSAPrivateKeyData(privateKeyData, expectedKeySize: 32)
         
         return try P256.Signing.PrivateKey(rawRepresentation: keyData)
     }
@@ -78,17 +102,10 @@ extension P384.Signing.PrivateKey: ByteBufferConvertible {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        // ECDSA private keys are stored as bignums in OpenSSH format
-        // P384 private keys should be exactly 48 bytes (may have leading zero)
-        guard privateKeyData.count >= 48 && privateKeyData.count <= 49 else {
-            throw InvalidOpenSSHKey.invalidLayout
-        }
+        // Process the private key data to validate size and remove leading zero if present
+        let keyData = try processECDSAPrivateKeyData(privateKeyData, expectedKeySize: 48)
         
-        // Remove leading zero if present
-        let keyData = privateKeyData.count == 49 && privateKeyData[0] == 0 ? 
-            privateKeyData.dropFirst() : privateKeyData
-        
-        return try P384.Signing.PrivateKey(rawRepresentation: Data(keyData))
+        return try P384.Signing.PrivateKey(rawRepresentation: keyData)
     }
     
     public func write(to buffer: inout ByteBuffer) -> Int {
@@ -120,17 +137,10 @@ extension P521.Signing.PrivateKey: ByteBufferConvertible {
             throw InvalidOpenSSHKey.invalidLayout
         }
         
-        // ECDSA private keys are stored as bignums in OpenSSH format
-        // P521 private keys should be exactly 66 bytes (may have leading zero)
-        guard privateKeyData.count >= 66 && privateKeyData.count <= 67 else {
-            throw InvalidOpenSSHKey.invalidLayout
-        }
+        // Process the private key data to validate size and remove leading zero if present
+        let keyData = try processECDSAPrivateKeyData(privateKeyData, expectedKeySize: 66)
         
-        // Remove leading zero if present
-        let keyData = privateKeyData.count == 67 && privateKeyData[0] == 0 ? 
-            privateKeyData.dropFirst() : privateKeyData
-        
-        return try P521.Signing.PrivateKey(rawRepresentation: Data(keyData))
+        return try P521.Signing.PrivateKey(rawRepresentation: keyData)
     }
     
     public func write(to buffer: inout ByteBuffer) -> Int {
@@ -166,7 +176,7 @@ extension P256.Signing.PublicKey: ByteBufferConvertible {
         }
         
         let pointBytes = pointData.getBytes(at: 0, length: pointData.readableBytes) ?? []
-        guard pointBytes.first == 0x04 else { // Uncompressed point
+        guard pointBytes.first == uncompressedPointPrefix else { // Uncompressed point
             throw InvalidOpenSSHKey.invalidLayout
         }
         
@@ -195,7 +205,7 @@ extension P384.Signing.PublicKey: ByteBufferConvertible {
         }
         
         let pointBytes = pointData.getBytes(at: 0, length: pointData.readableBytes) ?? []
-        guard pointBytes.first == 0x04 else { // Uncompressed point
+        guard pointBytes.first == uncompressedPointPrefix else { // Uncompressed point
             throw InvalidOpenSSHKey.invalidLayout
         }
         
@@ -224,7 +234,7 @@ extension P521.Signing.PublicKey: ByteBufferConvertible {
         }
         
         let pointBytes = pointData.getBytes(at: 0, length: pointData.readableBytes) ?? []
-        guard pointBytes.first == 0x04 else { // Uncompressed point
+        guard pointBytes.first == uncompressedPointPrefix else { // Uncompressed point
             throw InvalidOpenSSHKey.invalidLayout
         }
         
