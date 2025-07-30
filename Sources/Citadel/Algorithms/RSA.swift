@@ -734,6 +734,83 @@ extension BigUInt {
 
 // MARK: - PEM/DER Support for RSA Keys
 
+extension Insecure.RSA.PublicKey {
+    /// The Subject Public Key Info (SPKI) DER representation of the public key
+    public var spkiDERRepresentation: Data {
+        get throws {
+            // Create EVP_PKEY
+            guard let evpKey = CCryptoBoringSSL_EVP_PKEY_new() else {
+                throw RSAError(message: "Failed to create EVP_PKEY")
+            }
+            defer { CCryptoBoringSSL_EVP_PKEY_free(evpKey) }
+            
+            // Create RSA structure
+            guard let rsa = CCryptoBoringSSL_RSA_new() else {
+                throw RSAError(message: "Failed to create RSA structure")
+            }
+            defer { CCryptoBoringSSL_RSA_free(rsa) }
+            
+            // Copy BIGNUMs for RSA structure (RSA_set0_key takes ownership)
+            let nCopy = CCryptoBoringSSL_BN_dup(modulus)
+            let eCopy = CCryptoBoringSSL_BN_dup(publicExponent)
+            
+            guard CCryptoBoringSSL_RSA_set0_key(rsa, nCopy, eCopy, nil) == 1 else {
+                CCryptoBoringSSL_BN_free(nCopy)
+                CCryptoBoringSSL_BN_free(eCopy)
+                throw RSAError(message: "Failed to set RSA public key components")
+            }
+            
+            // Assign RSA to EVP_PKEY
+            guard CCryptoBoringSSL_EVP_PKEY_assign_RSA(evpKey, rsa) == 1 else {
+                throw RSAError(message: "Failed to assign RSA to EVP_PKEY")
+            }
+            
+            // Increment reference count since EVP_PKEY_assign_RSA doesn't take ownership
+            CCryptoBoringSSL_RSA_up_ref(rsa)
+            
+            // Encode to DER
+            let bio = CCryptoBoringSSL_BIO_new(CCryptoBoringSSL_BIO_s_mem())
+            defer { CCryptoBoringSSL_BIO_free(bio) }
+            
+            guard CCryptoBoringSSL_i2d_PUBKEY_bio(bio, evpKey) == 1 else {
+                throw RSAError(message: "Failed to write public key to BIO")
+            }
+            
+            // Read the data from BIO
+            var dataPointer: UnsafeMutablePointer<CChar>?
+            let length = CCryptoBoringSSL_BIO_get_mem_data(bio, &dataPointer)
+            
+            guard length > 0, let dataPointer = dataPointer else {
+                throw RSAError(message: "Failed to get public key data from BIO")
+            }
+            
+            return Data(bytes: dataPointer, count: Int(length))
+        }
+    }
+    
+    /// The PEM representation of the public key
+    public var pemRepresentation: String {
+        get throws {
+            let derData = try spkiDERRepresentation
+            let base64 = derData.base64EncodedString()
+            
+            // Format base64 with 64-character lines
+            var formattedBase64 = ""
+            var index = base64.startIndex
+            while index < base64.endIndex {
+                let endIndex = base64.index(index, offsetBy: 64, limitedBy: base64.endIndex) ?? base64.endIndex
+                formattedBase64 += base64[index..<endIndex]
+                if endIndex < base64.endIndex {
+                    formattedBase64 += "\n"
+                }
+                index = endIndex
+            }
+            
+            return "-----BEGIN PUBLIC KEY-----\n\(formattedBase64)\n-----END PUBLIC KEY-----"
+        }
+    }
+}
+
 extension Insecure.RSA.PrivateKey {
     /// The PEM representation of the private key
     public var pemRepresentation: String {

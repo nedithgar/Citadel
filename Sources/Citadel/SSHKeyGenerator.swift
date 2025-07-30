@@ -146,6 +146,33 @@ public struct SSHKeyPair: Sendable {
             return p521Key.pemRepresentation
         }
     }
+    
+    /// Exports the public key in PEM format
+    /// - Returns: The public key in PEM format
+    /// - Throws: An error if the export fails
+    public func publicKeyPEMString() throws -> String {
+        switch keyType {
+        case .rsa:
+            let rsaKey = underlyingPrivateKey as! Insecure.RSA.PrivateKey
+            return try rsaKey._publicKey.pemRepresentation
+            
+        case .ed25519:
+            let ed25519Key = underlyingPrivateKey as! Curve25519.Signing.PrivateKey
+            return ed25519Key.publicKey.pemRepresentation
+            
+        case .ecdsaP256:
+            let p256Key = underlyingPrivateKey as! P256.Signing.PrivateKey
+            return p256Key.publicKey.pemRepresentation
+            
+        case .ecdsaP384:
+            let p384Key = underlyingPrivateKey as! P384.Signing.PrivateKey
+            return p384Key.publicKey.pemRepresentation
+            
+        case .ecdsaP521:
+            let p521Key = underlyingPrivateKey as! P521.Signing.PrivateKey
+            return p521Key.publicKey.pemRepresentation
+        }
+    }
 }
 
 /// Supported SSH key types for generation
