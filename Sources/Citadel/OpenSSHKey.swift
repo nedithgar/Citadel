@@ -483,6 +483,14 @@ public enum OpenSSH {
         case sshRSACert = "ssh-rsa-cert-v01@openssh.com"
         case rsaSha256Cert = "rsa-sha2-256-cert-v01@openssh.com"
         case rsaSha512Cert = "rsa-sha2-512-cert-v01@openssh.com"
+        
+        // Ed25519 certificate type
+        case sshED25519Cert = "ssh-ed25519-cert-v01@openssh.com"
+        
+        // ECDSA certificate types
+        case ecdsaP256Cert = "ecdsa-sha2-nistp256-cert-v01@openssh.com"
+        case ecdsaP384Cert = "ecdsa-sha2-nistp384-cert-v01@openssh.com"
+        case ecdsaP521Cert = "ecdsa-sha2-nistp521-cert-v01@openssh.com"
     }
     
     struct PrivateKey<SSHKey: OpenSSHPrivateKey> {

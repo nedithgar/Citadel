@@ -203,7 +203,8 @@ final class KeyTests: XCTestCase {
         // Ensure all key types are covered
         let expectedTypes: Set<SSHKeyType> = [
             .rsa, .ed25519, .ecdsaP256, .ecdsaP384, .ecdsaP521,
-            .rsaCert, .rsaSha256Cert, .rsaSha512Cert
+            .rsaCert, .rsaSha256Cert, .rsaSha512Cert, .ed25519Cert,
+            .ecdsaP256Cert, .ecdsaP384Cert, .ecdsaP521Cert
         ]
         let allCases = Set(SSHKeyType.allCases)
         XCTAssertEqual(allCases, expectedTypes)
@@ -608,5 +609,21 @@ final class KeyTests: XCTestCase {
         XCTAssertEqual(SSHKeyType.rsaCert.description, "RSA Certificate (SHA-1)")
         XCTAssertEqual(SSHKeyType.rsaSha256Cert.description, "RSA Certificate (SHA-256)")
         XCTAssertEqual(SSHKeyType.rsaSha512Cert.description, "RSA Certificate (SHA-512)")
+    }
+    
+    func testECDSACertificateKeyTypeDetection() throws {
+        // Test ECDSA certificate key types
+        let ecdsaP256CertKey = "ecdsa-sha2-nistp256-cert-v01@openssh.com AAAAB3... user@example.com"
+        let ecdsaP384CertKey = "ecdsa-sha2-nistp384-cert-v01@openssh.com AAAAB3... user@example.com"
+        let ecdsaP521CertKey = "ecdsa-sha2-nistp521-cert-v01@openssh.com AAAAB3... user@example.com"
+        
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: ecdsaP256CertKey), .ecdsaP256Cert)
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: ecdsaP384CertKey), .ecdsaP384Cert)
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: ecdsaP521CertKey), .ecdsaP521Cert)
+        
+        // Test descriptions
+        XCTAssertEqual(SSHKeyType.ecdsaP256Cert.description, "ECDSA P-256 Certificate")
+        XCTAssertEqual(SSHKeyType.ecdsaP384Cert.description, "ECDSA P-384 Certificate")
+        XCTAssertEqual(SSHKeyType.ecdsaP521Cert.description, "ECDSA P-521 Certificate")
     }
 }
