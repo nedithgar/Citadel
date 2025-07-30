@@ -101,7 +101,7 @@ public struct SSHAlgorithms: Sendable {
         ])
 
         algorithms.publicKeyAlgorihtms = .add([
-            (Insecure.RSA.PublicKey.self, Insecure.RSA.Signature.self),
+            (Insecure.RSA.PublicKey.self, Insecure.RSA.Signature.self)
         ])
 
         return algorithms

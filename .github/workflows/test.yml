@@ -16,6 +16,7 @@ jobs:
                 image: lscr.io/linuxserver/openssh-server:latest
                 ports:
                     - 2222:2222
+                    - 2223:2223  # Additional port for certificate testing
                 env:
                     USER_NAME: citadel
                     USER_PASSWORD: hunter2
@@ -28,8 +29,54 @@ jobs:
             SWIFT_DETERMINISTIC_HASHING: 1
         steps:
             - uses: actions/checkout@v4
+            
+            - name: Install SSH tools for certificate generation
+              run: apt-get update && apt-get install -y openssh-client
+            
+            - name: Setup SSH certificates
+              run: |
+                # Generate CA key
+                ssh-keygen -t ed25519 -f /tmp/ca_key -N "" -C "Test CA"
+                
+                # Generate test certificates for different key types
+                mkdir -p test-certificates
+                cd test-certificates
+                
+                # Ed25519
+                ssh-keygen -t ed25519 -f user_ed25519 -N "" -C "test@example.com"
+                ssh-keygen -s /tmp/ca_key -I test-user -n citadel -V +1h user_ed25519.pub
+                
+                # RSA
+                ssh-keygen -t rsa -b 3072 -f user_rsa -N "" -C "test@example.com"
+                ssh-keygen -s /tmp/ca_key -I test-user -n citadel -V +1h user_rsa.pub
+                
+                # ECDSA variants
+                ssh-keygen -t ecdsa -b 256 -f user_ecdsa256 -N "" -C "test@example.com"
+                ssh-keygen -s /tmp/ca_key -I test-user -n citadel -V +1h user_ecdsa256.pub
+                
+                ssh-keygen -t ecdsa -b 384 -f user_ecdsa384 -N "" -C "test@example.com"
+                ssh-keygen -s /tmp/ca_key -I test-user -n citadel -V +1h user_ecdsa384.pub
+                
+                ssh-keygen -t ecdsa -b 521 -f user_ecdsa521 -N "" -C "test@example.com"
+                ssh-keygen -s /tmp/ca_key -I test-user -n citadel -V +1h user_ecdsa521.pub
+                
+                # Configure SSH server to trust our CA
+                docker cp /tmp/ca_key.pub ${{ job.services.ssh-server.id }}:/config/.ssh/ca_key.pub
+                docker exec ${{ job.services.ssh-server.id }} sh -c "
+                  echo 'TrustedUserCAKeys /config/.ssh/ca_key.pub' >> /config/sshd_config
+                  echo '' >> /config/sshd_config
+                  echo 'Match LocalPort 2223' >> /config/sshd_config
+                  echo '    PasswordAuthentication no' >> /config/sshd_config
+                  echo '    AuthorizedPrincipalsFile /config/.ssh/authorized_principals' >> /config/sshd_config
+                  echo 'citadel' > /config/.ssh/authorized_principals
+                  chmod 644 /config/.ssh/ca_key.pub /config/.ssh/authorized_principals
+                  # Restart SSH to apply changes
+                  supervisorctl restart openssh-server || killall -HUP sshd || true
+                "
+            
             - name: Resolve
               run: swift package resolve
+            
             - name: Run tests
               run: swift test
               env:
@@ -38,3 +85,5 @@ jobs:
                 SSH_PORT: 2222
                 SSH_USERNAME: citadel
                 SSH_PASSWORD: hunter2
+                SSH_CERT_PORT: 2223
+                TEST_CERTS_DIR: test-certificates
