@@ -50,9 +50,21 @@ public struct SSHKeyPair: Sendable {
     /// - Parameters:
     ///   - comment: Optional comment to include in the key (default: empty)
     ///   - passphrase: Optional passphrase to encrypt the key (default: nil for unencrypted)
+    ///   - cipher: The cipher to use for encryption when passphrase is provided (default: "aes256-ctr" when passphrase is set, "none" otherwise)
+    ///             Supported values: "none", "aes128-ctr", "aes256-ctr"
     /// - Returns: The private key in OpenSSH format
     /// - Throws: An error if the key type doesn't support OpenSSH format
-    public func privateKeyOpenSSHString(comment: String = "", passphrase: String? = nil) throws -> String {
+    public func privateKeyOpenSSHString(comment: String = "", passphrase: String? = nil, cipher: String? = nil) throws -> String {
+        // Determine the actual cipher to use
+        let actualCipher: String
+        if let cipher = cipher {
+            actualCipher = cipher
+        } else if passphrase != nil {
+            actualCipher = "aes256-ctr"  // Default to aes256-ctr when passphrase is provided
+        } else {
+            actualCipher = "none"
+        }
+        
         switch keyType {
         case .rsa:
             // RSA keys need to be wrapped in OpenSSH format
@@ -61,19 +73,19 @@ public struct SSHKeyPair: Sendable {
             
         case .ed25519:
             let ed25519Key = underlyingPrivateKey as! Curve25519.Signing.PrivateKey
-            return try ed25519Key.makeSSHRepresentation(comment: comment, passphrase: passphrase)
+            return try ed25519Key.makeSSHRepresentation(comment: comment, passphrase: passphrase, cipher: actualCipher)
             
         case .ecdsaP256:
             let p256Key = underlyingPrivateKey as! P256.Signing.PrivateKey
-            return try p256Key.makeSSHRepresentation(comment: comment, passphrase: passphrase)
+            return try p256Key.makeSSHRepresentation(comment: comment, passphrase: passphrase, cipher: actualCipher)
             
         case .ecdsaP384:
             let p384Key = underlyingPrivateKey as! P384.Signing.PrivateKey
-            return try p384Key.makeSSHRepresentation(comment: comment, passphrase: passphrase)
+            return try p384Key.makeSSHRepresentation(comment: comment, passphrase: passphrase, cipher: actualCipher)
             
         case .ecdsaP521:
             let p521Key = underlyingPrivateKey as! P521.Signing.PrivateKey
-            return try p521Key.makeSSHRepresentation(comment: comment, passphrase: passphrase)
+            return try p521Key.makeSSHRepresentation(comment: comment, passphrase: passphrase, cipher: actualCipher)
         }
     }
     

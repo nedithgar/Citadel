@@ -340,6 +340,13 @@ let ecdsaKeyPair = SSHKeyGenerator.generateECDSA(curve: .p256)
 let privateKeyString = try keyPair.privateKeyOpenSSHString(comment: "user@example.com")
 let publicKeyString = try keyPair.publicKeyOpenSSHString() // ssh-ed25519 AAAA...
 
+// Export with passphrase protection
+let encryptedKey = try keyPair.privateKeyOpenSSHString(
+    comment: "user@example.com",
+    passphrase: "secure_passphrase",
+    cipher: "aes256-ctr"  // Supported: "none", "aes128-ctr", "aes256-ctr"
+)
+
 // Use with SSHClient
 let client = try await SSHClient.connect(
     host: "example.com",

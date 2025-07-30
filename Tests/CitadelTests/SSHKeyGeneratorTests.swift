@@ -254,4 +254,34 @@ final class SSHKeyGeneratorTests: XCTestCase {
             XCTAssertTrue(pem!.contains("BEGIN") && pem!.contains("END"))
         }
     }
+    
+    func testPrivateKeyExportWithCipher() throws {
+        // Test Ed25519 key with different ciphers
+        let ed25519 = SSHKeyGenerator.generateEd25519()
+        
+        // Test with no passphrase (should use "none" cipher)
+        let unencrypted = try ed25519.privateKeyOpenSSHString()
+        XCTAssertTrue(unencrypted.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Test with passphrase but no cipher specified (should default to aes256-ctr)
+        let defaultCipher = try ed25519.privateKeyOpenSSHString(passphrase: "test123")
+        XCTAssertTrue(defaultCipher.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Test with passphrase and explicit aes128-ctr cipher
+        let aes128 = try ed25519.privateKeyOpenSSHString(passphrase: "test123", cipher: "aes128-ctr")
+        XCTAssertTrue(aes128.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Test with passphrase and explicit aes256-ctr cipher
+        let aes256 = try ed25519.privateKeyOpenSSHString(passphrase: "test123", cipher: "aes256-ctr")
+        XCTAssertTrue(aes256.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Test with passphrase but explicit "none" cipher (unencrypted despite passphrase)
+        let noCipher = try ed25519.privateKeyOpenSSHString(passphrase: "test123", cipher: "none")
+        XCTAssertTrue(noCipher.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Test ECDSA key with cipher
+        let ecdsa = SSHKeyGenerator.generateECDSA(curve: .p256)
+        let ecdsaEncrypted = try ecdsa.privateKeyOpenSSHString(passphrase: "test456", cipher: "aes128-ctr")
+        XCTAssertTrue(ecdsaEncrypted.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+    }
 }
