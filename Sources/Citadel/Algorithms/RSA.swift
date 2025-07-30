@@ -5,7 +5,9 @@ import NIOSSH
 import CCryptoBoringSSL
 import Foundation
 import Crypto
+#if canImport(Security)
 import Security
+#endif
 
 extension Insecure {
     public enum RSA {
@@ -596,11 +598,7 @@ extension Insecure.RSA {
             certBuffer.writeSSHString(Self.publicKeyPrefix(for: signatureAlgorithm))
             
             // Write nonce (32 random bytes)
-            var nonce = Data(count: 32)
-            nonce.withUnsafeMutableBytes { bytes in
-                guard let baseAddress = bytes.baseAddress else { return }
-                _ = SecRandomCopyBytes(kSecRandomDefault, 32, baseAddress)
-            }
+            let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
             certBuffer.writeSSHData(nonce)
             
             // Write public key
