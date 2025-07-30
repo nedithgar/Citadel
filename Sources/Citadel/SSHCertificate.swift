@@ -211,6 +211,7 @@ public enum SSHCertificateError: Error {
     case invalidCertificateType
     case missingNonce
     case missingPublicKey
+    case invalidPublicKey
     case missingSerial
     case missingType
     case missingKeyId
