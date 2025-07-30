@@ -72,7 +72,7 @@ extension Curve25519.Signing.PrivateKey: OpenSSHPrivateKey {
         cipher: String = "none",
         rounds: Int = 16
     ) throws -> String {
-        try (self as OpenSSHPrivateKey).makeSSHRepresentation(
+        try (self as any OpenSSHPrivateKey).makeSSHRepresentation(
             comment: comment,
             passphrase: passphrase,
             cipher: cipher,
@@ -136,7 +136,7 @@ extension Insecure.RSA.PrivateKey: OpenSSHPrivateKey {
         cipher: String = "none",
         rounds: Int = 16
     ) throws -> String {
-        try (self as OpenSSHPrivateKey).makeSSHRepresentation(
+        try (self as any OpenSSHPrivateKey).makeSSHRepresentation(
             comment: comment,
             passphrase: passphrase,
             cipher: cipher,
