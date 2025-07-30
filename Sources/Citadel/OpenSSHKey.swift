@@ -228,7 +228,8 @@ extension OpenSSHPrivateKey {
         
         // Add padding
         let cipherEnum = OpenSSH.Cipher(rawValue: actualCipher) ?? .none
-        let neededBytes = UInt8(cipherEnum.blockSize - (privateKeyBuffer.writerIndex % cipherEnum.blockSize))
+        let remainder = privateKeyBuffer.writerIndex % cipherEnum.blockSize
+        let neededBytes = remainder == 0 ? 0 : UInt8(cipherEnum.blockSize - remainder)
         if neededBytes > 0 {
             for i in 1...neededBytes {
                 privateKeyBuffer.writeInteger(i)
@@ -477,6 +478,11 @@ public enum OpenSSH {
         case ecdsaP256 = "ecdsa-sha2-nistp256"
         case ecdsaP384 = "ecdsa-sha2-nistp384"
         case ecdsaP521 = "ecdsa-sha2-nistp521"
+        
+        // RSA certificate types
+        case sshRSACert = "ssh-rsa-cert-v01@openssh.com"
+        case rsaSha256Cert = "rsa-sha2-256-cert-v01@openssh.com"
+        case rsaSha512Cert = "rsa-sha2-512-cert-v01@openssh.com"
     }
     
     struct PrivateKey<SSHKey: OpenSSHPrivateKey> {
@@ -592,7 +598,7 @@ extension OpenSSH.PrivateKey {
             return
         }
         
-        for i in 1..<paddingLength {
+        for i in 1...paddingLength {
             guard padding[i - 1] == UInt8(i) else {
                 throw InvalidOpenSSHKey.invalidPadding
             }

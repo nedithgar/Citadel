@@ -14,15 +14,44 @@ extension Insecure {
             case sha256 = "rsa-sha2-256"
             case sha512 = "rsa-sha2-512"
             
+            // Certificate variants
+            case sha1Cert = "ssh-rsa-cert-v01@openssh.com"
+            case sha256Cert = "rsa-sha2-256-cert-v01@openssh.com"
+            case sha512Cert = "rsa-sha2-512-cert-v01@openssh.com"
+            
             /// Get the corresponding NID for BoringSSL
-            var nid: Int32 {
+            public var nid: Int32 {
                 switch self {
-                case .sha1:
+                case .sha1, .sha1Cert:
                     return NID_sha1
-                case .sha256:
+                case .sha256, .sha256Cert:
                     return NID_sha256
-                case .sha512:
+                case .sha512, .sha512Cert:
                     return NID_sha512
+                }
+            }
+            
+            /// Whether this algorithm represents a certificate
+            public var isCertificate: Bool {
+                switch self {
+                case .sha1Cert, .sha256Cert, .sha512Cert:
+                    return true
+                default:
+                    return false
+                }
+            }
+            
+            /// Get the base signature algorithm (non-certificate version)
+            public var baseAlgorithm: SignatureHashAlgorithm {
+                switch self {
+                case .sha1Cert:
+                    return .sha1
+                case .sha256Cert:
+                    return .sha256
+                case .sha512Cert:
+                    return .sha512
+                default:
+                    return self
                 }
             }
         }
@@ -30,8 +59,8 @@ extension Insecure {
 }
 
 extension Insecure.RSA {
-    public final class PublicKey: NIOSSHPublicKeyProtocol {
-        public static let publicKeyPrefix = "ssh-rsa"
+    public class PublicKey: NIOSSHPublicKeyProtocol {
+        public class var publicKeyPrefix: String { "ssh-rsa" }
         public static let keyExchangeAlgorithms = ["diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"]
         
         // PublicExponent e
@@ -56,7 +85,7 @@ extension Insecure.RSA {
             case invalidInitialSequence, invalidAlgorithmIdentifier, invalidSubjectPubkey, forbiddenTrailingData, invalidRSAPubkey
         }
         
-        public init(publicExponent: UnsafeMutablePointer<BIGNUM>, modulus: UnsafeMutablePointer<BIGNUM>) {
+        public required init(publicExponent: UnsafeMutablePointer<BIGNUM>, modulus: UnsafeMutablePointer<BIGNUM>) {
             self.publicExponent = publicExponent
             self.modulus = modulus
         }
@@ -98,16 +127,16 @@ extension Insecure.RSA {
             let hashLength: Int
             
             switch signature.algorithm {
-            case .sha1:
+            case .sha1, .sha1Cert:
                 var hash = [UInt8](repeating: 0, count: 20)
                 CCryptoBoringSSL_SHA1(messageData, messageData.count, &hash)
                 hashedMessage = hash
                 hashLength = 20
-            case .sha256:
+            case .sha256, .sha256Cert:
                 let hash = SHA256.hash(data: digest)
                 hashedMessage = Array(hash)
                 hashLength = 32
-            case .sha512:
+            case .sha512, .sha512Cert:
                 let hash = SHA512.hash(data: digest)
                 hashedMessage = Array(hash)
                 hashLength = 64
@@ -140,11 +169,11 @@ extension Insecure.RSA {
             return writtenBytes
         }
         
-        static func read(consuming buffer: inout ByteBuffer) throws -> Insecure.RSA.PublicKey {
+        static func read(consuming buffer: inout ByteBuffer) throws -> Self {
             try read(from: &buffer)
         }
         
-        public static func read(from buffer: inout ByteBuffer) throws -> Insecure.RSA.PublicKey {
+        public static func read(from buffer: inout ByteBuffer) throws -> Self {
             guard
                 var publicExponent = buffer.readSSHBuffer(),
                 var modulus = buffer.readSSHBuffer()
@@ -154,7 +183,7 @@ extension Insecure.RSA {
             
             let publicExponentBytes = publicExponent.readBytes(length: publicExponent.readableBytes)!
             let modulusBytes = modulus.readBytes(length: modulus.readableBytes)!
-            return .init(
+            return self.init(
                 publicExponent: CCryptoBoringSSL_BN_bin2bn(publicExponentBytes, publicExponentBytes.count, nil),
                 modulus: CCryptoBoringSSL_BN_bin2bn(modulusBytes, modulusBytes.count, nil)
             )
@@ -395,11 +424,11 @@ extension Insecure.RSA {
             // Hash the message based on the selected algorithm
             let hashedMessage: [UInt8]
             switch algorithm {
-            case .sha1:
+            case .sha1, .sha1Cert:
                 hashedMessage = Array(Insecure.SHA1.hash(data: message))
-            case .sha256:
+            case .sha256, .sha256Cert:
                 hashedMessage = Array(SHA256.hash(data: message))
-            case .sha512:
+            case .sha512, .sha512Cert:
                 hashedMessage = Array(SHA512.hash(data: message))
             }
             
@@ -462,6 +491,30 @@ extension Insecure.RSA {
             CCryptoBoringSSL_BN_bn2bin(secret, &array)
             return Data(array)
         }
+    }
+    
+    // MARK: - RSA Certificate Public Key Types
+    
+    /// Base class for RSA certificate public keys
+    public class CertificatePublicKey: PublicKey {
+        public override class var publicKeyPrefix: String {
+            fatalError("Subclasses must override publicKeyPrefix")
+        }
+    }
+    
+    /// RSA certificate with SHA-1 (legacy)
+    public final class SHA1CertificatePublicKey: CertificatePublicKey {
+        public override class var publicKeyPrefix: String { "ssh-rsa-cert-v01@openssh.com" }
+    }
+    
+    /// RSA certificate with SHA-256
+    public final class SHA256CertificatePublicKey: CertificatePublicKey {
+        public override class var publicKeyPrefix: String { "rsa-sha2-256-cert-v01@openssh.com" }
+    }
+    
+    /// RSA certificate with SHA-512
+    public final class SHA512CertificatePublicKey: CertificatePublicKey {
+        public override class var publicKeyPrefix: String { "rsa-sha2-512-cert-v01@openssh.com" }
     }
 }
 

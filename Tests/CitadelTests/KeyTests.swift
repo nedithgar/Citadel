@@ -201,7 +201,10 @@ final class KeyTests: XCTestCase {
     
     func testSSHKeyTypeAllCases() {
         // Ensure all key types are covered
-        let expectedTypes: Set<SSHKeyType> = [.rsa, .ed25519, .ecdsaP256, .ecdsaP384, .ecdsaP521]
+        let expectedTypes: Set<SSHKeyType> = [
+            .rsa, .ed25519, .ecdsaP256, .ecdsaP384, .ecdsaP521,
+            .rsaCert, .rsaSha256Cert, .rsaSha512Cert
+        ]
         let allCases = Set(SSHKeyType.allCases)
         XCTAssertEqual(allCases, expectedTypes)
         
@@ -561,5 +564,49 @@ final class KeyTests: XCTestCase {
         XCTAssertEqual(deserializedSig.algorithm, .sha256)
         XCTAssertEqual(deserializedSig.rawRepresentation, sha256Signature.rawRepresentation)
         XCTAssertTrue(publicKey.isValidSignature(deserializedSig, for: message))
+    }
+    
+    func testRSACertificateKeyTypes() throws {
+        // Test that certificate key type prefixes are correctly defined
+        XCTAssertEqual(Insecure.RSA.SHA1CertificatePublicKey.publicKeyPrefix, "ssh-rsa-cert-v01@openssh.com")
+        XCTAssertEqual(Insecure.RSA.SHA256CertificatePublicKey.publicKeyPrefix, "rsa-sha2-256-cert-v01@openssh.com")
+        XCTAssertEqual(Insecure.RSA.SHA512CertificatePublicKey.publicKeyPrefix, "rsa-sha2-512-cert-v01@openssh.com")
+        
+        // Test certificate algorithm enum
+        let sha1Cert = Insecure.RSA.SignatureHashAlgorithm.sha1Cert
+        XCTAssertTrue(sha1Cert.isCertificate)
+        XCTAssertEqual(sha1Cert.baseAlgorithm, .sha1)
+        XCTAssertEqual(sha1Cert.nid, Int32(64)) // NID_sha1
+        
+        let sha256Cert = Insecure.RSA.SignatureHashAlgorithm.sha256Cert
+        XCTAssertTrue(sha256Cert.isCertificate)
+        XCTAssertEqual(sha256Cert.baseAlgorithm, .sha256)
+        XCTAssertEqual(sha256Cert.nid, Int32(672)) // NID_sha256
+        
+        let sha512Cert = Insecure.RSA.SignatureHashAlgorithm.sha512Cert
+        XCTAssertTrue(sha512Cert.isCertificate)
+        XCTAssertEqual(sha512Cert.baseAlgorithm, .sha512)
+        XCTAssertEqual(sha512Cert.nid, Int32(674)) // NID_sha512
+        
+        // Test non-certificate algorithms
+        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha1.isCertificate)
+        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha256.isCertificate)
+        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha512.isCertificate)
+    }
+    
+    func testRSACertificateKeyTypeDetection() throws {
+        // Test public key detection for RSA certificates
+        let rsaCertKey = "ssh-rsa-cert-v01@openssh.com AAAAB3NzaC1yc2EtY2VydC12MDFAb3BlbnNzaC5jb20AAAAgLongBase64DataHere... user@host"
+        let sha256CertKey = "rsa-sha2-256-cert-v01@openssh.com AAAAB3NzaC1yc2EtY2VydC12MDFAb3BlbnNzaC5jb20AAAAgLongBase64DataHere... user@host"
+        let sha512CertKey = "rsa-sha2-512-cert-v01@openssh.com AAAAB3NzaC1yc2EtY2VydC12MDFAb3BlbnNzaC5jb20AAAAgLongBase64DataHere... user@host"
+        
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: rsaCertKey), .rsaCert)
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: sha256CertKey), .rsaSha256Cert)
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: sha512CertKey), .rsaSha512Cert)
+        
+        // Test that descriptions are correct
+        XCTAssertEqual(SSHKeyType.rsaCert.description, "RSA Certificate (SHA-1)")
+        XCTAssertEqual(SSHKeyType.rsaSha256Cert.description, "RSA Certificate (SHA-256)")
+        XCTAssertEqual(SSHKeyType.rsaSha512Cert.description, "RSA Certificate (SHA-512)")
     }
 }

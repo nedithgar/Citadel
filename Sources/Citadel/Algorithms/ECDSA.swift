@@ -373,3 +373,50 @@ public extension P521.Signing.PrivateKey {
         )
     }
 }
+
+// MARK: - PEM/PKCS#8 Support
+
+// Note: Apple Crypto's P256, P384, and P521 types already have built-in support for PEM/PKCS#8 formats.
+// The following documentation comments describe the existing functionality from Apple Crypto.
+
+// MARK: P256 PEM/PKCS#8 Support
+
+/*
+ P256.Signing.PrivateKey already provides:
+ - pemRepresentation: String - PEM representation using PKCS#8 format
+ - init(pemRepresentation: String) - Creates from PEM string
+ - derRepresentation: Data - DER representation using PKCS#8 format
+ - init(derRepresentation: Data) - Creates from DER data
+ 
+ P256.Signing.PublicKey already provides:
+ - pemRepresentation: String - PEM representation using SubjectPublicKeyInfo format
+ - init(pemRepresentation: String) - Creates from PEM string
+ */
+
+// MARK: P384 PEM/PKCS#8 Support
+
+/*
+ P384.Signing.PrivateKey already provides:
+ - pemRepresentation: String - PEM representation using PKCS#8 format
+ - init(pemRepresentation: String) - Creates from PEM string
+ - derRepresentation: Data - DER representation using PKCS#8 format
+ - init(derRepresentation: Data) - Creates from DER data
+ 
+ P384.Signing.PublicKey already provides:
+ - pemRepresentation: String - PEM representation using SubjectPublicKeyInfo format
+ - init(pemRepresentation: String) - Creates from PEM string
+ */
+
+// MARK: P521 PEM/PKCS#8 Support
+
+/*
+ P521.Signing.PrivateKey already provides:
+ - pemRepresentation: String - PEM representation using PKCS#8 format
+ - init(pemRepresentation: String) - Creates from PEM string
+ - derRepresentation: Data - DER representation using PKCS#8 format
+ - init(derRepresentation: Data) - Creates from DER data
+ 
+ P521.Signing.PublicKey already provides:
+ - pemRepresentation: String - PEM representation using SubjectPublicKeyInfo format
+ - init(pemRepresentation: String) - Creates from PEM string
+ */
