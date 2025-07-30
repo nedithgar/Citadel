@@ -339,6 +339,7 @@ let ecdsaKeyPair = SSHKeyGenerator.generateECDSA(curve: .p256)
 // Export keys in various formats
 let privateKeyString = try keyPair.privateKeyOpenSSHString(comment: "user@example.com")
 let publicKeyString = try keyPair.publicKeyOpenSSHString() // ssh-ed25519 AAAA...
+let privateKeyPEM = try keyPair.privateKeyPEMString() // PEM format
 
 // Export with passphrase protection
 let encryptedKey = try keyPair.privateKeyOpenSSHString(

@@ -732,6 +732,227 @@ extension BigUInt {
     ] as [UInt8]))
 }
 
+// MARK: - PEM/DER Support for RSA Keys
+
+extension Insecure.RSA.PrivateKey {
+    /// The PEM representation of the private key
+    public var pemRepresentation: String {
+        get throws {
+            // Create RSA structure
+            guard let rsa = CCryptoBoringSSL_RSA_new() else {
+                throw RSAError(message: "Failed to create RSA structure")
+            }
+            defer { CCryptoBoringSSL_RSA_free(rsa) }
+            
+            // Copy BIGNUMs for RSA structure (RSA_set0_key takes ownership)
+            let nCopy = CCryptoBoringSSL_BN_dup(_publicKey.modulus)
+            let eCopy = CCryptoBoringSSL_BN_dup(_publicKey.publicExponent)
+            let dCopy = CCryptoBoringSSL_BN_dup(privateExponent)
+            
+            guard CCryptoBoringSSL_RSA_set0_key(rsa, nCopy, eCopy, dCopy) == 1 else {
+                CCryptoBoringSSL_BN_free(nCopy)
+                CCryptoBoringSSL_BN_free(eCopy)
+                CCryptoBoringSSL_BN_free(dCopy)
+                throw RSAError(message: "Failed to set RSA key components")
+            }
+            
+            // Set factors if available
+            if let p = p, let q = q {
+                let pCopy = CCryptoBoringSSL_BN_dup(p)
+                let qCopy = CCryptoBoringSSL_BN_dup(q)
+                CCryptoBoringSSL_RSA_set0_factors(rsa, pCopy, qCopy)
+                
+                // Set CRT params if available
+                if let iqmp = iqmp {
+                    let (dmp1, dmq1) = calculateCRTParams()
+                    if let dmp1 = dmp1, let dmq1 = dmq1 {
+                        let iqmpCopy = CCryptoBoringSSL_BN_dup(iqmp)
+                        CCryptoBoringSSL_RSA_set0_crt_params(rsa, dmp1, dmq1, iqmpCopy)
+                    }
+                }
+            }
+            
+            // Write to BIO
+            guard let bio = CCryptoBoringSSL_BIO_new(CCryptoBoringSSL_BIO_s_mem()) else {
+                throw RSAError(message: "Failed to create BIO")
+            }
+            defer { CCryptoBoringSSL_BIO_free(bio) }
+            
+            guard CCryptoBoringSSL_PEM_write_bio_RSAPrivateKey(bio, rsa, nil, nil, 0, nil, nil) == 1 else {
+                throw RSAError(message: "Failed to write RSA private key to PEM")
+            }
+            
+            // Read PEM from BIO
+            var ptr: UnsafeMutablePointer<CChar>?
+            let length = CCryptoBoringSSL_BIO_get_mem_data(bio, &ptr)
+            guard length > 0, let ptr = ptr else {
+                throw RSAError(message: "Failed to get PEM data from BIO")
+            }
+            
+            return String(cString: ptr)
+        }
+    }
+    
+    /// Initialize from PEM representation
+    public convenience init(pemRepresentation: String) throws {
+        // Use BoringSSL to parse the PEM
+        let pemData = Data(pemRepresentation.utf8)
+        let bio = pemData.withUnsafeBytes { bytes in
+            CCryptoBoringSSL_BIO_new_mem_buf(bytes.baseAddress, Int(bytes.count))
+        }
+        defer { CCryptoBoringSSL_BIO_free(bio) }
+        
+        guard let rsa = CCryptoBoringSSL_PEM_read_bio_RSAPrivateKey(bio, nil, nil, nil) else {
+            throw RSAError(message: "Failed to parse PEM-encoded RSA private key")
+        }
+        defer { CCryptoBoringSSL_RSA_free(rsa) }
+        
+        // Extract components from the RSA structure
+        var n: UnsafePointer<BIGNUM>?
+        var e: UnsafePointer<BIGNUM>?
+        var d: UnsafePointer<BIGNUM>?
+        var p: UnsafePointer<BIGNUM>?
+        var q: UnsafePointer<BIGNUM>?
+        var dmp1: UnsafePointer<BIGNUM>?
+        var dmq1: UnsafePointer<BIGNUM>?
+        var iqmp: UnsafePointer<BIGNUM>?
+        
+        CCryptoBoringSSL_RSA_get0_key(rsa, &n, &e, &d)
+        CCryptoBoringSSL_RSA_get0_factors(rsa, &p, &q)
+        CCryptoBoringSSL_RSA_get0_crt_params(rsa, &dmp1, &dmq1, &iqmp)
+        
+        // Create copies of the BIGNUMs
+        let modulus = CCryptoBoringSSL_BN_dup(n)!
+        let publicExponent = CCryptoBoringSSL_BN_dup(e)!
+        let privateExponent = CCryptoBoringSSL_BN_dup(d)!
+        let pCopy = p != nil ? CCryptoBoringSSL_BN_dup(p) : nil
+        let qCopy = q != nil ? CCryptoBoringSSL_BN_dup(q) : nil
+        let iqmpCopy = iqmp != nil ? CCryptoBoringSSL_BN_dup(iqmp) : nil
+        
+        self.init(
+            privateExponent: privateExponent,
+            publicExponent: publicExponent,
+            modulus: modulus,
+            p: pCopy,
+            q: qCopy,
+            iqmp: iqmpCopy
+        )
+    }
+    
+    /// The DER representation of the private key
+    public var derRepresentation: Data {
+        get throws {
+            // Create RSA structure
+            guard let rsa = CCryptoBoringSSL_RSA_new() else {
+                throw RSAError(message: "Failed to create RSA structure")
+            }
+            defer { CCryptoBoringSSL_RSA_free(rsa) }
+            
+            // Copy BIGNUMs for RSA structure (RSA_set0_key takes ownership)
+            let nCopy = CCryptoBoringSSL_BN_dup(_publicKey.modulus)
+            let eCopy = CCryptoBoringSSL_BN_dup(_publicKey.publicExponent)
+            let dCopy = CCryptoBoringSSL_BN_dup(privateExponent)
+            
+            guard CCryptoBoringSSL_RSA_set0_key(rsa, nCopy, eCopy, dCopy) == 1 else {
+                CCryptoBoringSSL_BN_free(nCopy)
+                CCryptoBoringSSL_BN_free(eCopy)
+                CCryptoBoringSSL_BN_free(dCopy)
+                throw RSAError(message: "Failed to set RSA key components")
+            }
+            
+            // Set factors if available
+            if let p = p, let q = q {
+                let pCopy = CCryptoBoringSSL_BN_dup(p)
+                let qCopy = CCryptoBoringSSL_BN_dup(q)
+                CCryptoBoringSSL_RSA_set0_factors(rsa, pCopy, qCopy)
+                
+                // Set CRT params if available
+                if let iqmp = iqmp {
+                    let (dmp1, dmq1) = calculateCRTParams()
+                    if let dmp1 = dmp1, let dmq1 = dmq1 {
+                        let iqmpCopy = CCryptoBoringSSL_BN_dup(iqmp)
+                        CCryptoBoringSSL_RSA_set0_crt_params(rsa, dmp1, dmq1, iqmpCopy)
+                    }
+                }
+            }
+            
+            // Write to BIO
+            guard let bio = CCryptoBoringSSL_BIO_new(CCryptoBoringSSL_BIO_s_mem()) else {
+                throw RSAError(message: "Failed to create BIO")
+            }
+            defer { CCryptoBoringSSL_BIO_free(bio) }
+            
+            guard CCryptoBoringSSL_i2d_RSAPrivateKey_bio(bio, rsa) == 1 else {
+                throw RSAError(message: "Failed to write RSA private key to DER")
+            }
+            
+            // Read DER from BIO
+            var ptr: UnsafeMutablePointer<CChar>?
+            let length = CCryptoBoringSSL_BIO_get_mem_data(bio, &ptr)
+            guard length > 0, let ptr = ptr else {
+                throw RSAError(message: "Failed to get DER data from BIO")
+            }
+            
+            return Data(bytes: ptr, count: Int(length))
+        }
+    }
+    
+    /// Initialize from DER representation
+    public convenience init(derRepresentation: Data) throws {
+        // Use BoringSSL to parse the DER
+        let bio = derRepresentation.withUnsafeBytes { bytes in
+            CCryptoBoringSSL_BIO_new_mem_buf(bytes.baseAddress, Int(bytes.count))
+        }
+        defer { CCryptoBoringSSL_BIO_free(bio) }
+        
+        guard let rsa = CCryptoBoringSSL_d2i_RSAPrivateKey_bio(bio, nil) else {
+            throw RSAError(message: "Failed to parse DER-encoded RSA private key")
+        }
+        defer { CCryptoBoringSSL_RSA_free(rsa) }
+        
+        // Extract components from the RSA structure
+        var n: UnsafePointer<BIGNUM>?
+        var e: UnsafePointer<BIGNUM>?
+        var d: UnsafePointer<BIGNUM>?
+        var p: UnsafePointer<BIGNUM>?
+        var q: UnsafePointer<BIGNUM>?
+        var dmp1: UnsafePointer<BIGNUM>?
+        var dmq1: UnsafePointer<BIGNUM>?
+        var iqmp: UnsafePointer<BIGNUM>?
+        
+        CCryptoBoringSSL_RSA_get0_key(rsa, &n, &e, &d)
+        CCryptoBoringSSL_RSA_get0_factors(rsa, &p, &q)
+        CCryptoBoringSSL_RSA_get0_crt_params(rsa, &dmp1, &dmq1, &iqmp)
+        
+        // Create copies of the BIGNUMs
+        let modulus = CCryptoBoringSSL_BN_dup(n)!
+        let publicExponent = CCryptoBoringSSL_BN_dup(e)!
+        let privateExponent = CCryptoBoringSSL_BN_dup(d)!
+        let pCopy = p != nil ? CCryptoBoringSSL_BN_dup(p) : nil
+        let qCopy = q != nil ? CCryptoBoringSSL_BN_dup(q) : nil
+        let iqmpCopy = iqmp != nil ? CCryptoBoringSSL_BN_dup(iqmp) : nil
+        
+        self.init(
+            privateExponent: privateExponent,
+            publicExponent: publicExponent,
+            modulus: modulus,
+            p: pCopy,
+            q: qCopy,
+            iqmp: iqmpCopy
+        )
+    }
+}
+
+// Helper extension to convert BIGNUM to Data
+private extension Data {
+    init(bignum: UnsafeMutablePointer<BIGNUM>) {
+        let size = Int(CCryptoBoringSSL_BN_num_bytes(bignum))
+        var bytes = [UInt8](repeating: 0, count: size)
+        CCryptoBoringSSL_BN_bn2bin(bignum, &bytes)
+        self = Data(bytes)
+    }
+}
+
 extension ByteBuffer {
     @discardableResult
     mutating func readPositiveMPInt() -> BigUInt? {

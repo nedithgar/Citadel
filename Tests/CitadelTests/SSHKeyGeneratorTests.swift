@@ -239,14 +239,19 @@ final class SSHKeyGeneratorTests: XCTestCase {
     }
     
     func testPEMExportSupport() throws {
-        // Ed25519 and RSA don't support PEM
+        // Ed25519 now supports PEM
         let ed25519 = SSHKeyGenerator.generateEd25519()
         let ed25519PEM = try ed25519.privateKeyPEMString()
-        XCTAssertNil(ed25519PEM)
+        XCTAssertNotNil(ed25519PEM)
+        XCTAssertTrue(ed25519PEM!.contains("-----BEGIN PRIVATE KEY-----"))
+        XCTAssertTrue(ed25519PEM!.contains("-----END PRIVATE KEY-----"))
         
+        // RSA now supports PEM
         let rsa = SSHKeyGenerator.generateRSA()
         let rsaPEM = try rsa.privateKeyPEMString()
-        XCTAssertNil(rsaPEM)
+        XCTAssertNotNil(rsaPEM)
+        XCTAssertTrue(rsaPEM!.contains("-----BEGIN RSA PRIVATE KEY-----"))
+        XCTAssertTrue(rsaPEM!.contains("-----END RSA PRIVATE KEY-----"))
         
         // ECDSA keys should support PEM
         let ecdsaKeys = [
@@ -290,5 +295,136 @@ final class SSHKeyGeneratorTests: XCTestCase {
         let ecdsa = SSHKeyGenerator.generateECDSA(curve: .p256)
         let ecdsaEncrypted = try ecdsa.privateKeyOpenSSHString(passphrase: "test456", cipher: "aes128-ctr")
         XCTAssertTrue(ecdsaEncrypted.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+    }
+    
+    // MARK: - RSA PEM Export/Import Tests
+    
+    func testRSAPEMExportImportRoundtrip() throws {
+        // Test various RSA key sizes
+        let keySizes = [2048, 3072, 4096]
+        
+        for bits in keySizes {
+            // Generate RSA key
+            let originalKeyPair = SSHKeyGenerator.generateRSA(bits: bits)
+            
+            // Export to PEM using SSHKeyGenerator interface
+            let pemString = try originalKeyPair.privateKeyPEMString()
+            XCTAssertNotNil(pemString)
+            XCTAssertTrue(pemString!.contains("-----BEGIN RSA PRIVATE KEY-----"))
+            XCTAssertTrue(pemString!.contains("-----END RSA PRIVATE KEY-----"))
+            
+            // Import from PEM
+            let importedKey = try Insecure.RSA.PrivateKey(pemRepresentation: pemString!)
+            
+            // Export imported key to PEM again
+            let reimportedPEM = try importedKey.pemRepresentation
+            
+            // Verify both PEMs produce working keys by re-importing and checking
+            // Import the re-exported PEM
+            let reimportedKey = try Insecure.RSA.PrivateKey(pemRepresentation: reimportedPEM)
+            
+            // Test data
+            let testData = "Test data for signature \(bits) bits".data(using: .utf8)!
+            
+            // Create signatures using the imported keys directly
+            let importedSig = try importedKey.signature(for: testData)
+            let reimportedSig = try reimportedKey.signature(for: testData)
+            
+            // Verify signatures work with their own public keys
+            XCTAssertTrue(importedKey.publicKey.isValidSignature(importedSig, for: testData))
+            XCTAssertTrue(reimportedKey.publicKey.isValidSignature(reimportedSig, for: testData))
+            
+            // Cross-verify: keys should validate each other's signatures
+            XCTAssertTrue(importedKey.publicKey.isValidSignature(reimportedSig, for: testData))
+            XCTAssertTrue(reimportedKey.publicKey.isValidSignature(importedSig, for: testData))
+        }
+    }
+    
+    func testRSADERExportImportRoundtrip() throws {
+        // Generate a fresh RSA key directly
+        let originalKey = Insecure.RSA.PrivateKey(bits: 2048)
+        
+        // Export to DER
+        let derData = try originalKey.derRepresentation
+        XCTAssertGreaterThan(derData.count, 0)
+        
+        // Import from DER
+        let importedKey = try Insecure.RSA.PrivateKey(derRepresentation: derData)
+        
+        // Compare by creating signatures
+        let testData = "Test data for DER roundtrip".data(using: .utf8)!
+        let originalSig = try originalKey.signature(for: testData)
+        let importedSig = try importedKey.signature(for: testData)
+        
+        // Verify both signatures work
+        XCTAssertTrue(originalKey.publicKey.isValidSignature(originalSig, for: testData))
+        XCTAssertTrue(importedKey.publicKey.isValidSignature(importedSig, for: testData))
+        
+        // Cross-verify
+        XCTAssertTrue(originalKey.publicKey.isValidSignature(importedSig, for: testData))
+        XCTAssertTrue(importedKey.publicKey.isValidSignature(originalSig, for: testData))
+        
+        // Also test DER -> PEM -> DER roundtrip
+        let pemFromDER = try importedKey.pemRepresentation
+        let keyFromPEM = try Insecure.RSA.PrivateKey(pemRepresentation: pemFromDER)
+        let derFromPEM = try keyFromPEM.derRepresentation
+        
+        // DER data might not be byte-for-byte identical but should produce equivalent keys
+        let finalKey = try Insecure.RSA.PrivateKey(derRepresentation: derFromPEM)
+        let finalSig = try finalKey.signature(for: testData)
+        XCTAssertTrue(originalKey.publicKey.isValidSignature(finalSig, for: testData))
+    }
+    
+    func testRSAPEMImportFromExternalKey() throws {
+        // Generate a valid RSA key, export to PEM, then use that as external
+        let generatedKey = Insecure.RSA.PrivateKey(bits: 2048)
+        let validPEM = try generatedKey.pemRepresentation
+        
+        // Now test importing this "external" PEM
+        let externalPEM = validPEM
+        
+        // Import the external key
+        let importedKey = try Insecure.RSA.PrivateKey(pemRepresentation: externalPEM)
+        
+        // Test that we can use it to sign data
+        let testData = "Test data for external key".data(using: .utf8)!
+        let signature = try importedKey.signature(for: testData)
+        
+        // Verify the signature
+        XCTAssertTrue(importedKey.publicKey.isValidSignature(signature, for: testData))
+        
+        // Export it back to PEM and verify it's valid
+        let reexportedPEM = try importedKey.pemRepresentation
+        XCTAssertTrue(reexportedPEM.contains("-----BEGIN RSA PRIVATE KEY-----"))
+        XCTAssertTrue(reexportedPEM.contains("-----END RSA PRIVATE KEY-----"))
+    }
+    
+    func testRSAPEMCompatibilityWithSSHKeyGenerator() throws {
+        // Generate key using SSHKeyGenerator
+        let keyPair = SSHKeyGenerator.generateRSA(bits: 2048)
+        
+        // Get PEM through SSHKeyGenerator interface
+        let pemFromGenerator = try keyPair.privateKeyPEMString()
+        XCTAssertNotNil(pemFromGenerator)
+        XCTAssertTrue(pemFromGenerator!.contains("-----BEGIN RSA PRIVATE KEY-----"))
+        
+        // Import the PEM and verify it works
+        let keyFromPEM = try Insecure.RSA.PrivateKey(pemRepresentation: pemFromGenerator!)
+        
+        // Test that the imported key produces valid signatures
+        let testData = "Compatibility test".data(using: .utf8)!
+        let importedSig = try keyFromPEM.signature(for: testData)
+        
+        // The imported key should be able to validate its own signature
+        XCTAssertTrue(keyFromPEM.publicKey.isValidSignature(importedSig, for: testData))
+        
+        // Export both to PEM again and they should produce valid PEMs
+        let reExportedPEM = try keyFromPEM.pemRepresentation
+        XCTAssertTrue(reExportedPEM.contains("-----BEGIN RSA PRIVATE KEY-----"))
+        XCTAssertTrue(reExportedPEM.contains("-----END RSA PRIVATE KEY-----"))
+        
+        // Test OpenSSH format export still works
+        let opensshFormat = try keyPair.privateKeyOpenSSHString()
+        XCTAssertTrue(opensshFormat.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
     }
 }

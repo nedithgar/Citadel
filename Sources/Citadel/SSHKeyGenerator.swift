@@ -126,12 +126,12 @@ public struct SSHKeyPair: Sendable {
     public func privateKeyPEMString() throws -> String? {
         switch keyType {
         case .rsa:
-            // RSA PEM export would require additional implementation
-            return nil
+            let rsaKey = underlyingPrivateKey as! Insecure.RSA.PrivateKey
+            return try rsaKey.pemRepresentation
             
         case .ed25519:
-            // Ed25519 doesn't have standard PEM format in Swift Crypto
-            return nil
+            let ed25519Key = underlyingPrivateKey as! Curve25519.Signing.PrivateKey
+            return ed25519Key.pemRepresentation
             
         case .ecdsaP256:
             let p256Key = underlyingPrivateKey as! P256.Signing.PrivateKey
