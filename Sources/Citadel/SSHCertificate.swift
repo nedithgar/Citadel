@@ -85,10 +85,36 @@ public struct SSHCertificate {
         }
         
         // Read public key
-        guard let publicKeyData = buffer.readSSHData() else {
-            throw SSHCertificateError.missingPublicKey
+        // Different key types store public keys differently in certificates
+        if keyType.contains("ssh-rsa-cert") || keyType.contains("rsa-sha2") {
+            // RSA: Read e and n components and reconstruct the public key data
+            guard let e = buffer.readSSHData(),
+                  let n = buffer.readSSHData() else {
+                throw SSHCertificateError.missingPublicKey
+            }
+            
+            // Reconstruct the public key data in the format expected by RSA.PublicKey
+            var publicKeyBuffer = ByteBufferAllocator().buffer(capacity: e.count + n.count + 8)
+            publicKeyBuffer.writeSSHData(e)
+            publicKeyBuffer.writeSSHData(n)
+            self.publicKey = Data(publicKeyBuffer.readableBytesView)
+        } else if keyType.contains("ecdsa-sha2") {
+            // ECDSA: Read curve identifier and point data
+            guard let _ = buffer.readSSHString(), // curve identifier
+                  let pointData = buffer.readSSHData() else {
+                throw SSHCertificateError.missingPublicKey
+            }
+            
+            // ECDSA certificates store the point data in x963 format (04 || x || y)
+            // which is what P256/P384/P521.Signing.PublicKey expects
+            self.publicKey = pointData
+        } else {
+            // Ed25519: Read as a single blob
+            guard let publicKeyData = buffer.readSSHData() else {
+                throw SSHCertificateError.missingPublicKey
+            }
+            self.publicKey = publicKeyData
         }
-        self.publicKey = publicKeyData
         
         // Read serial
         guard let serial = buffer.readInteger(as: UInt64.self) else {

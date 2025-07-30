@@ -24,7 +24,8 @@ final class ECDSACertificateTests: XCTestCase {
         let privateKey = P256.Signing.PrivateKey()
         let publicKey = privateKey.publicKey
         
-        // Write public key
+        // Write public key components (curve identifier and point data)
+        buffer.writeSSHString("nistp256")
         buffer.writeSSHString(publicKey.x963Representation)
         
         // Write certificate fields
@@ -197,7 +198,8 @@ final class ECDSACertificateTests: XCTestCase {
         let privateKey = P384.Signing.PrivateKey()
         let publicKey = privateKey.publicKey
         
-        // Write public key
+        // Write public key components (curve identifier and point data)
+        buffer.writeSSHString("nistp384")
         buffer.writeSSHString(publicKey.x963Representation)
         
         // Write certificate fields
@@ -267,7 +269,8 @@ final class ECDSACertificateTests: XCTestCase {
         let privateKey = P521.Signing.PrivateKey()
         let publicKey = privateKey.publicKey
         
-        // Write public key
+        // Write public key components (curve identifier and point data)
+        buffer.writeSSHString("nistp521")
         buffer.writeSSHString(publicKey.x963Representation)
         
         // Write certificate fields
