@@ -5,6 +5,7 @@ import NIOSSH
 import CCryptoBoringSSL
 import Foundation
 import Crypto
+import Security
 
 extension Insecure {
     public enum RSA {
@@ -59,8 +60,8 @@ extension Insecure {
 }
 
 extension Insecure.RSA {
-    public class PublicKey: NIOSSHPublicKeyProtocol {
-        public class var publicKeyPrefix: String { "ssh-rsa" }
+    public final class PublicKey: NIOSSHPublicKeyProtocol {
+        public static let publicKeyPrefix = "ssh-rsa"
         public static let keyExchangeAlgorithms = ["diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"]
         
         // PublicExponent e
@@ -85,7 +86,7 @@ extension Insecure.RSA {
             case invalidInitialSequence, invalidAlgorithmIdentifier, invalidSubjectPubkey, forbiddenTrailingData, invalidRSAPubkey
         }
         
-        public required init(publicExponent: UnsafeMutablePointer<BIGNUM>, modulus: UnsafeMutablePointer<BIGNUM>) {
+        public init(publicExponent: UnsafeMutablePointer<BIGNUM>, modulus: UnsafeMutablePointer<BIGNUM>) {
             self.publicExponent = publicExponent
             self.modulus = modulus
         }
@@ -169,11 +170,11 @@ extension Insecure.RSA {
             return writtenBytes
         }
         
-        static func read(consuming buffer: inout ByteBuffer) throws -> Self {
+        static func read(consuming buffer: inout ByteBuffer) throws -> PublicKey {
             try read(from: &buffer)
         }
         
-        public static func read(from buffer: inout ByteBuffer) throws -> Self {
+        public static func read(from buffer: inout ByteBuffer) throws -> PublicKey {
             guard
                 var publicExponent = buffer.readSSHBuffer(),
                 var modulus = buffer.readSSHBuffer()
@@ -183,7 +184,7 @@ extension Insecure.RSA {
             
             let publicExponentBytes = publicExponent.readBytes(length: publicExponent.readableBytes)!
             let modulusBytes = modulus.readBytes(length: modulus.readableBytes)!
-            return self.init(
+            return PublicKey(
                 publicExponent: CCryptoBoringSSL_BN_bin2bn(publicExponentBytes, publicExponentBytes.count, nil),
                 modulus: CCryptoBoringSSL_BN_bin2bn(modulusBytes, modulusBytes.count, nil)
             )
@@ -495,26 +496,173 @@ extension Insecure.RSA {
     
     // MARK: - RSA Certificate Public Key Types
     
-    /// Base class for RSA certificate public keys
-    public class CertificatePublicKey: PublicKey {
-        public override class var publicKeyPrefix: String {
-            fatalError("Subclasses must override publicKeyPrefix")
+    /// RSA certificate public key that wraps a regular RSA public key with certificate metadata
+    public final class CertificatePublicKey: NIOSSHPublicKeyProtocol {
+        /// SSH certificate type identifier - this is overridden based on the algorithm
+        public static let publicKeyPrefix = "ssh-rsa-cert-v01@openssh.com" // Default for protocol conformance
+        /// The underlying RSA public key
+        public let publicKey: PublicKey
+        
+        /// The SSH certificate
+        public let certificate: SSHCertificate
+        
+        /// The signature algorithm for this certificate
+        public let signatureAlgorithm: SignatureHashAlgorithm
+        
+        /// SSH certificate type identifier based on signature algorithm
+        public static func publicKeyPrefix(for algorithm: SignatureHashAlgorithm) -> String {
+            switch algorithm {
+            case .sha1Cert:
+                return "ssh-rsa-cert-v01@openssh.com"
+            case .sha256Cert:
+                return "rsa-sha2-256-cert-v01@openssh.com"
+            case .sha512Cert:
+                return "rsa-sha2-512-cert-v01@openssh.com"
+            default:
+                fatalError("Invalid certificate algorithm")
+            }
         }
-    }
-    
-    /// RSA certificate with SHA-1 (legacy)
-    public final class SHA1CertificatePublicKey: CertificatePublicKey {
-        public override class var publicKeyPrefix: String { "ssh-rsa-cert-v01@openssh.com" }
-    }
-    
-    /// RSA certificate with SHA-256
-    public final class SHA256CertificatePublicKey: CertificatePublicKey {
-        public override class var publicKeyPrefix: String { "rsa-sha2-256-cert-v01@openssh.com" }
-    }
-    
-    /// RSA certificate with SHA-512
-    public final class SHA512CertificatePublicKey: CertificatePublicKey {
-        public override class var publicKeyPrefix: String { "rsa-sha2-512-cert-v01@openssh.com" }
+        
+        /// The raw representation of the public key (not the certificate)
+        public var rawRepresentation: Data {
+            publicKey.rawRepresentation
+        }
+        
+        /// Initialize from certificate data with a specific algorithm
+        public init(certificateData: Data, algorithm: SignatureHashAlgorithm) throws {
+            guard algorithm.isCertificate else {
+                throw RSAError(message: "Algorithm must be a certificate type")
+            }
+            
+            self.signatureAlgorithm = algorithm
+            let expectedPrefix = Self.publicKeyPrefix(for: algorithm)
+            self.certificate = try SSHCertificate(from: certificateData, expectedKeyType: expectedPrefix)
+            
+            // Extract the RSA public key from the certificate
+            guard let publicKeyData = certificate.publicKey else {
+                throw SSHCertificateError.missingPublicKey
+            }
+            
+            var buffer = ByteBuffer(data: publicKeyData)
+            self.publicKey = try PublicKey.read(from: &buffer)
+        }
+        
+        /// Initialize with existing certificate and public key
+        public init(certificate: SSHCertificate, publicKey: PublicKey, algorithm: SignatureHashAlgorithm) {
+            self.certificate = certificate
+            self.publicKey = publicKey
+            self.signatureAlgorithm = algorithm
+        }
+        
+        // MARK: - NIOSSHPublicKeyProtocol conformance
+        
+        public static func read(from buffer: inout ByteBuffer) throws -> CertificatePublicKey {
+            // Save the entire certificate blob
+            let startIndex = buffer.readerIndex
+            
+            // Read the key type string to determine the algorithm
+            guard let keyType = buffer.readSSHString() else {
+                throw SSHCertificateError.invalidCertificateType
+            }
+            
+            // Determine the algorithm from the key type
+            let algorithm: SignatureHashAlgorithm
+            switch keyType {
+            case "ssh-rsa-cert-v01@openssh.com":
+                algorithm = .sha1Cert
+            case "rsa-sha2-256-cert-v01@openssh.com":
+                algorithm = .sha256Cert
+            case "rsa-sha2-512-cert-v01@openssh.com":
+                algorithm = .sha512Cert
+            default:
+                throw SSHCertificateError.invalidCertificateType
+            }
+            
+            // Reset buffer and read the full certificate
+            buffer.moveReaderIndex(to: startIndex)
+            let certLength = buffer.readableBytes
+            guard let certData = buffer.readData(length: certLength) else {
+                throw SSHCertificateError.invalidCertificateType
+            }
+            
+            return try CertificatePublicKey(certificateData: certData, algorithm: algorithm)
+        }
+        
+        public func write(to buffer: inout ByteBuffer) -> Int {
+            // Create a buffer for the certificate
+            var certBuffer = ByteBufferAllocator().buffer(capacity: 1024)
+            
+            // Write key type
+            certBuffer.writeSSHString(Self.publicKeyPrefix(for: signatureAlgorithm))
+            
+            // Write nonce (32 random bytes)
+            var nonce = Data(count: 32)
+            nonce.withUnsafeMutableBytes { bytes in
+                guard let baseAddress = bytes.baseAddress else { return }
+                _ = SecRandomCopyBytes(kSecRandomDefault, 32, baseAddress)
+            }
+            certBuffer.writeSSHData(nonce)
+            
+            // Write public key
+            var publicKeyBuffer = ByteBufferAllocator().buffer(capacity: 256)
+            // Cast to NIOSSHPublicKeyProtocol to avoid ambiguity
+            let nioSSHKey = publicKey as NIOSSHPublicKeyProtocol
+            _ = nioSSHKey.write(to: &publicKeyBuffer)
+            certBuffer.writeSSHData(Data(publicKeyBuffer.readableBytesView))
+            
+            // Write serial
+            certBuffer.writeInteger(certificate.serial)
+            
+            // Write type
+            certBuffer.writeInteger(certificate.type)
+            
+            // Write key ID
+            certBuffer.writeSSHString(certificate.keyId)
+            
+            // Write valid principals
+            var principalsBuffer = ByteBufferAllocator().buffer(capacity: 512)
+            for principal in certificate.validPrincipals {
+                principalsBuffer.writeSSHString(principal)
+            }
+            certBuffer.writeSSHString(Data(principalsBuffer.readableBytesView))
+            
+            // Write validity period
+            certBuffer.writeInteger(certificate.validAfter)
+            certBuffer.writeInteger(certificate.validBefore)
+            
+            // Write critical options
+            var criticalOptionsBuffer = ByteBufferAllocator().buffer(capacity: 512)
+            for (name, value) in certificate.criticalOptions {
+                criticalOptionsBuffer.writeSSHString(name)
+                criticalOptionsBuffer.writeSSHData(value)
+            }
+            certBuffer.writeSSHString(Data(criticalOptionsBuffer.readableBytesView))
+            
+            // Write extensions
+            var extensionsBuffer = ByteBufferAllocator().buffer(capacity: 512)
+            for (name, value) in certificate.extensions {
+                extensionsBuffer.writeSSHString(name)
+                extensionsBuffer.writeSSHData(value)
+            }
+            certBuffer.writeSSHString(Data(extensionsBuffer.readableBytesView))
+            
+            // Write reserved
+            certBuffer.writeSSHData(certificate.reserved)
+            
+            // Write signature key
+            certBuffer.writeSSHData(certificate.signatureKey)
+            
+            // Write signature
+            certBuffer.writeSSHData(certificate.signature)
+            
+            // Write the complete certificate to the output buffer
+            return buffer.writeBuffer(&certBuffer)
+        }
+        
+        public func isValidSignature<D>(_ signature: NIOSSHSignatureProtocol, for data: D) -> Bool where D : DataProtocol {
+            // Delegate to the underlying public key
+            publicKey.isValidSignature(signature, for: data)
+        }
     }
 }
 
