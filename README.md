@@ -347,15 +347,6 @@ let encryptedKey = try keyPair.privateKeyOpenSSHString(
     cipher: "aes256-ctr"  // Supported: "none", "aes128-ctr", "aes256-ctr"
 )
 
-// Use with SSHClient
-let client = try await SSHClient.connect(
-    host: "example.com",
-    port: 22,
-    authenticationMethod: keyPair.authenticationMethod(username: "user"),
-    hostKeyValidator: .acceptAnything(),
-    reconnect: .never
-)
-
 // Save keys to files
 try privateKeyString.write(toFile: "~/.ssh/id_ed25519", atomically: true, encoding: .utf8)
 try publicKeyString.write(toFile: "~/.ssh/id_ed25519.pub", atomically: true, encoding: .utf8)

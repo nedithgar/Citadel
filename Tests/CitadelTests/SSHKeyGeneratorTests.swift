@@ -170,27 +170,6 @@ final class SSHKeyGeneratorTests: XCTestCase {
         }
     }
     
-    // MARK: - Authentication Method Tests
-    
-    func testAuthenticationMethodCreation() throws {
-        let username = "testuser"
-        
-        // Test RSA
-        let rsaKeyPair = SSHKeyGenerator.generateRSA()
-        let rsaAuth = rsaKeyPair.authenticationMethod(username: username)
-        XCTAssertNotNil(rsaAuth)
-        
-        // Test Ed25519
-        let ed25519KeyPair = SSHKeyGenerator.generateEd25519()
-        let ed25519Auth = ed25519KeyPair.authenticationMethod(username: username)
-        XCTAssertNotNil(ed25519Auth)
-        
-        // Test ECDSA
-        let ecdsaKeyPair = SSHKeyGenerator.generateECDSA(curve: .p256)
-        let ecdsaAuth = ecdsaKeyPair.authenticationMethod(username: username)
-        XCTAssertNotNil(ecdsaAuth)
-    }
-    
     // MARK: - Key Uniqueness Tests
     
     func testGeneratedKeysAreUnique() throws {

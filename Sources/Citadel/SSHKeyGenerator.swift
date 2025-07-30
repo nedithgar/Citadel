@@ -233,36 +233,3 @@ public enum SSHKeyGeneratorError: Error {
     /// The export format is not supported for this key type
     case unsupportedExportFormat(String)
 }
-
-// MARK: - Convenience Extensions
-
-extension SSHKeyPair {
-    /// Create an authentication method for use with SSHClient
-    /// - Parameter username: The username to authenticate with
-    /// - Returns: An SSH authentication method
-    public func authenticationMethod(username: String) -> SSHAuthenticationMethod {
-        // We need to properly identify and cast the key types
-        // Since we control the creation, we can safely force cast based on keyType
-        switch keyType {
-        case .rsa:
-            let rsaKey = underlyingPrivateKey as! Insecure.RSA.PrivateKey
-            return .rsa(username: username, privateKey: rsaKey)
-            
-        case .ed25519:
-            let ed25519Key = underlyingPrivateKey as! Curve25519.Signing.PrivateKey
-            return .ed25519(username: username, privateKey: ed25519Key)
-            
-        case .ecdsaP256:
-            let p256Key = underlyingPrivateKey as! P256.Signing.PrivateKey
-            return .p256(username: username, privateKey: p256Key)
-            
-        case .ecdsaP384:
-            let p384Key = underlyingPrivateKey as! P384.Signing.PrivateKey
-            return .p384(username: username, privateKey: p384Key)
-            
-        case .ecdsaP521:
-            let p521Key = underlyingPrivateKey as! P521.Signing.PrivateKey
-            return .p521(username: username, privateKey: p521Key)
-        }
-    }
-}
