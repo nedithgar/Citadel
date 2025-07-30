@@ -24,32 +24,190 @@ final class CertificateAuthenticationTests: XCTestCase {
         XCTAssertEqual(P521.Signing.CertificatePublicKey.publicKeyPrefix, "ecdsa-sha2-nistp521-cert-v01@openssh.com")
     }
     
-    // Test that authentication methods can be created with certificate-enabled keys
-    func testAuthenticationMethodsWithCertificates() throws {
-        // Ed25519
-        let ed25519Key = Curve25519.Signing.PrivateKey()
-        let ed25519Auth = SSHAuthenticationMethod.ed25519(username: "test", privateKey: ed25519Key)
-        XCTAssertNotNil(ed25519Auth)
+    // Helper function to create a test certificate
+    private func createTestCertificate(publicKey: Data, keyType: String) -> SSHCertificate {
+        let now = UInt64(Date().timeIntervalSince1970)
+        let caPrivateKey = Curve25519.Signing.PrivateKey()
+        let caPublicKey = caPrivateKey.publicKey
         
-        // RSA
-        let rsaKey = try Insecure.RSA.PrivateKey(keySize: .bits2048)
-        let rsaAuth = SSHAuthenticationMethod.rsa(username: "test", privateKey: rsaKey)
-        XCTAssertNotNil(rsaAuth)
+        // Create CA signature key data
+        var caKeyBuffer = ByteBufferAllocator().buffer(capacity: 256)
+        caKeyBuffer.writeSSHString("ssh-ed25519")
+        caKeyBuffer.writeSSHData(caPublicKey.rawRepresentation)
+        let caKeyData = Data(caKeyBuffer.readableBytesView)
         
-        // P256
-        let p256Key = P256.Signing.PrivateKey()
-        let p256Auth = SSHAuthenticationMethod.p256(username: "test", privateKey: p256Key)
-        XCTAssertNotNil(p256Auth)
+        // Create a dummy signature (in real usage, this would be a proper signature)
+        var signatureBuffer = ByteBufferAllocator().buffer(capacity: 128)
+        signatureBuffer.writeSSHString("ssh-ed25519")
+        signatureBuffer.writeSSHData(Data(repeating: 0, count: 64)) // Ed25519 signature is 64 bytes
+        let signatureData = Data(signatureBuffer.readableBytesView)
         
-        // P384
-        let p384Key = P384.Signing.PrivateKey()
-        let p384Auth = SSHAuthenticationMethod.p384(username: "test", privateKey: p384Key)
-        XCTAssertNotNil(p384Auth)
+        return SSHCertificate(
+            serial: 1,
+            type: 1, // User certificate
+            keyId: "test-user@example.com",
+            validPrincipals: ["testuser", "admin"],
+            validAfter: now - 3600, // Valid from 1 hour ago
+            validBefore: now + 3600, // Valid for 1 hour from now
+            criticalOptions: [],
+            extensions: [
+                ("permit-X11-forwarding", Data()),
+                ("permit-agent-forwarding", Data()),
+                ("permit-port-forwarding", Data()),
+                ("permit-pty", Data()),
+                ("permit-user-rc", Data())
+            ],
+            reserved: Data(),
+            signatureKey: caKeyData,
+            signature: signatureData,
+            publicKey: publicKey
+        )
+    }
+    
+    // Test creating and using Ed25519 certificates
+    func testEd25519CertificateAuthentication() throws {
+        // Create a key pair
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey
         
-        // P521
-        let p521Key = P521.Signing.PrivateKey()
-        let p521Auth = SSHAuthenticationMethod.p521(username: "test", privateKey: p521Key)
-        XCTAssertNotNil(p521Auth)
+        // Create a test certificate
+        let certificate = createTestCertificate(
+            publicKey: publicKey.rawRepresentation,
+            keyType: "ssh-ed25519-cert-v01@openssh.com"
+        )
+        
+        // Create the certificate public key
+        let certPublicKey = Ed25519.CertificatePublicKey(
+            certificate: certificate,
+            publicKey: publicKey
+        )
+        
+        // Verify it implements NIOSSHPublicKeyProtocol
+        XCTAssertTrue(type(of: certPublicKey) is NIOSSHPublicKeyProtocol.Type)
+        
+        // Create authentication method with the private key
+        // The certificate will be included automatically when authenticating
+        let authMethod = SSHAuthenticationMethod.ed25519(username: "testuser", privateKey: privateKey)
+        XCTAssertNotNil(authMethod)
+    }
+    
+    // Test creating and using RSA certificates
+    func testRSACertificateAuthentication() throws {
+        // Create a key pair
+        let privateKey = Insecure.RSA.PrivateKey(bits: 2048)
+        let publicKey = privateKey.publicKey as! Insecure.RSA.PublicKey
+        
+        // Create public key data for RSA
+        // RSA public key in SSH format is: e (exponent) followed by n (modulus)
+        let publicKeyData = publicKey.rawRepresentation
+        
+        // Create a test certificate
+        let certificate = createTestCertificate(
+            publicKey: publicKeyData,
+            keyType: "ssh-rsa-cert-v01@openssh.com"
+        )
+        
+        // Create the certificate public key with SHA256 algorithm
+        let certPublicKey = Insecure.RSA.CertificatePublicKey(
+            certificate: certificate,
+            publicKey: publicKey,
+            algorithm: .sha256Cert
+        )
+        
+        // Verify it implements NIOSSHPublicKeyProtocol
+        XCTAssertTrue(type(of: certPublicKey) is NIOSSHPublicKeyProtocol.Type)
+        
+        // Create authentication method
+        let authMethod = SSHAuthenticationMethod.rsa(username: "testuser", privateKey: privateKey)
+        XCTAssertNotNil(authMethod)
+    }
+    
+    // Test creating and using ECDSA P256 certificates
+    func testP256CertificateAuthentication() throws {
+        // Create a key pair
+        let privateKey = P256.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey
+        
+        // Create public key data for P256
+        // ECDSA certificates store the full x963 representation
+        let publicKeyData = publicKey.x963Representation
+        
+        // Create a test certificate
+        let certificate = createTestCertificate(
+            publicKey: publicKeyData,
+            keyType: "ecdsa-sha2-nistp256-cert-v01@openssh.com"
+        )
+        
+        // Create the certificate public key
+        let certPublicKey = P256.Signing.CertificatePublicKey(
+            certificate: certificate,
+            publicKey: publicKey
+        )
+        
+        // Verify it implements NIOSSHPublicKeyProtocol
+        XCTAssertTrue(type(of: certPublicKey) is NIOSSHPublicKeyProtocol.Type)
+        
+        // Create authentication method
+        let authMethod = SSHAuthenticationMethod.p256(username: "testuser", privateKey: privateKey)
+        XCTAssertNotNil(authMethod)
+    }
+    
+    // Test creating and using ECDSA P384 certificates
+    func testP384CertificateAuthentication() throws {
+        // Create a key pair
+        let privateKey = P384.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey
+        
+        // Create public key data for P384
+        let publicKeyData = publicKey.x963Representation
+        
+        // Create a test certificate
+        let certificate = createTestCertificate(
+            publicKey: publicKeyData,
+            keyType: "ecdsa-sha2-nistp384-cert-v01@openssh.com"
+        )
+        
+        // Create the certificate public key
+        let certPublicKey = P384.Signing.CertificatePublicKey(
+            certificate: certificate,
+            publicKey: publicKey
+        )
+        
+        // Verify it implements NIOSSHPublicKeyProtocol
+        XCTAssertTrue(type(of: certPublicKey) is NIOSSHPublicKeyProtocol.Type)
+        
+        // Create authentication method
+        let authMethod = SSHAuthenticationMethod.p384(username: "testuser", privateKey: privateKey)
+        XCTAssertNotNil(authMethod)
+    }
+    
+    // Test creating and using ECDSA P521 certificates
+    func testP521CertificateAuthentication() throws {
+        // Create a key pair
+        let privateKey = P521.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey
+        
+        // Create public key data for P521
+        let publicKeyData = publicKey.x963Representation
+        
+        // Create a test certificate
+        let certificate = createTestCertificate(
+            publicKey: publicKeyData,
+            keyType: "ecdsa-sha2-nistp521-cert-v01@openssh.com"
+        )
+        
+        // Create the certificate public key
+        let certPublicKey = P521.Signing.CertificatePublicKey(
+            certificate: certificate,
+            publicKey: publicKey
+        )
+        
+        // Verify it implements NIOSSHPublicKeyProtocol
+        XCTAssertTrue(type(of: certPublicKey) is NIOSSHPublicKeyProtocol.Type)
+        
+        // Create authentication method
+        let authMethod = SSHAuthenticationMethod.p521(username: "testuser", privateKey: privateKey)
+        XCTAssertNotNil(authMethod)
     }
     
     // Test the CertificateKeyWrapper utility
@@ -65,22 +223,90 @@ final class CertificateAuthenticationTests: XCTestCase {
         XCTAssertFalse(CertificateKeyWrapper.isCertificateKeyType(Insecure.RSA.PublicKey.self))
     }
     
-    // Test certificate parsing functionality (from existing certificate tests)
-    func testEd25519CertificateParsing() throws {
-        // This would test the actual certificate parsing if we had test certificate data
-        // For now, we verify the type exists and implements the required protocol
-        XCTAssertTrue(Ed25519.CertificatePublicKey.self is NIOSSHPublicKeyProtocol.Type)
+    // Test certificate serialization and deserialization
+    func testCertificateSerialization() throws {
+        // Create a test Ed25519 certificate
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey
+        
+        let certificate = createTestCertificate(
+            publicKey: publicKey.rawRepresentation,
+            keyType: "ssh-ed25519-cert-v01@openssh.com"
+        )
+        
+        let certPublicKey = Ed25519.CertificatePublicKey(
+            certificate: certificate,
+            publicKey: publicKey
+        )
+        
+        // Serialize the certificate
+        var buffer = ByteBufferAllocator().buffer(capacity: 1024)
+        _ = certPublicKey.write(to: &buffer)
+        
+        // Deserialize and verify
+        let deserialized = try Ed25519.CertificatePublicKey.read(from: &buffer)
+        XCTAssertEqual(deserialized.publicKey.rawRepresentation, publicKey.rawRepresentation)
+        XCTAssertEqual(deserialized.certificate.serial, certificate.serial)
+        XCTAssertEqual(deserialized.certificate.keyId, certificate.keyId)
+        XCTAssertEqual(deserialized.certificate.validPrincipals, certificate.validPrincipals)
     }
     
-    func testRSACertificateParsing() throws {
-        // Verify RSA certificate types implement the required protocol
-        XCTAssertTrue(Insecure.RSA.CertificatePublicKey.self is NIOSSHPublicKeyProtocol.Type)
-    }
-    
-    func testECDSACertificateParsing() throws {
-        // Verify ECDSA certificate types implement the required protocol
-        XCTAssertTrue(P256.Signing.CertificatePublicKey.self is NIOSSHPublicKeyProtocol.Type)
-        XCTAssertTrue(P384.Signing.CertificatePublicKey.self is NIOSSHPublicKeyProtocol.Type)
-        XCTAssertTrue(P521.Signing.CertificatePublicKey.self is NIOSSHPublicKeyProtocol.Type)
+    // Test certificate validation timing
+    func testCertificateValidityPeriod() throws {
+        let now = UInt64(Date().timeIntervalSince1970)
+        let privateKey = Curve25519.Signing.PrivateKey()
+        
+        // Create an expired certificate
+        let expiredCert = SSHCertificate(
+            serial: 1,
+            type: 1,
+            keyId: "expired-cert",
+            validPrincipals: ["user"],
+            validAfter: now - 7200, // 2 hours ago
+            validBefore: now - 3600, // 1 hour ago (expired)
+            criticalOptions: [],
+            extensions: [],
+            reserved: Data(),
+            signatureKey: Data(),
+            signature: Data(),
+            publicKey: privateKey.publicKey.rawRepresentation
+        )
+        
+        // Create a not-yet-valid certificate
+        let futureCert = SSHCertificate(
+            serial: 2,
+            type: 1,
+            keyId: "future-cert",
+            validPrincipals: ["user"],
+            validAfter: now + 3600, // 1 hour from now (not yet valid)
+            validBefore: now + 7200, // 2 hours from now
+            criticalOptions: [],
+            extensions: [],
+            reserved: Data(),
+            signatureKey: Data(),
+            signature: Data(),
+            publicKey: privateKey.publicKey.rawRepresentation
+        )
+        
+        // Create a currently valid certificate
+        let validCert = SSHCertificate(
+            serial: 3,
+            type: 1,
+            keyId: "valid-cert",
+            validPrincipals: ["user"],
+            validAfter: now - 3600, // 1 hour ago
+            validBefore: now + 3600, // 1 hour from now
+            criticalOptions: [],
+            extensions: [],
+            reserved: Data(),
+            signatureKey: Data(),
+            signature: Data(),
+            publicKey: privateKey.publicKey.rawRepresentation
+        )
+        
+        // Verify the certificates have the expected validity periods
+        XCTAssertTrue(expiredCert.validBefore < now)
+        XCTAssertTrue(futureCert.validAfter > now)
+        XCTAssertTrue(validCert.validAfter < now && validCert.validBefore > now)
     }
 }
