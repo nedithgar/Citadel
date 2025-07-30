@@ -5,9 +5,6 @@ import NIOSSH
 import CCryptoBoringSSL
 import Foundation
 import Crypto
-#if canImport(Security)
-import Security
-#endif
 
 extension Insecure {
     public enum RSA {

@@ -5,7 +5,6 @@ import NIO
 import Crypto
 import CCitadelBcrypt
 import NIOSSH
-import Security
 
 // Noteable links:
 // https://dnaeon.github.io/openssh-private-key-binary-format/
@@ -180,8 +179,7 @@ extension OpenSSHPrivateKey {
             kdfName = "bcrypt"
             
             // Generate salt for BCrypt
-            var salt = [UInt8](repeating: 0, count: 16)
-            _ = SecRandomCopyBytes(kSecRandomDefault, 16, &salt)
+            let salt = [UInt8]((0..<16).map { _ in UInt8.random(in: 0...255) })
             
             // Create KDF options buffer
             var optionsBuffer = allocator.buffer(capacity: 32)
