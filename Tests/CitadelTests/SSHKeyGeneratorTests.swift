@@ -44,6 +44,34 @@ final class SSHKeyGeneratorTests: XCTestCase {
         XCTAssertEqual(bits, 4096)
     }
     
+    func testRSAOpenSSHFormat() throws {
+        let keyPair = SSHKeyGenerator.generateRSA(bits: 2048)
+        
+        // Test unencrypted export
+        let privateKey = try keyPair.privateKeyOpenSSHString()
+        XCTAssertTrue(privateKey.contains("BEGIN OPENSSH PRIVATE KEY"))
+        XCTAssertTrue(privateKey.contains("END OPENSSH PRIVATE KEY"))
+        
+        // Test with comment
+        let privateKeyWithComment = try keyPair.privateKeyOpenSSHString(comment: "test@example.com")
+        XCTAssertTrue(privateKeyWithComment.contains("BEGIN OPENSSH PRIVATE KEY"))
+        
+        // Test with passphrase
+        let encryptedKey = try keyPair.privateKeyOpenSSHString(
+            comment: "test@example.com",
+            passphrase: "secret123"
+        )
+        XCTAssertTrue(encryptedKey.contains("BEGIN OPENSSH PRIVATE KEY"))
+        
+        // Test with custom cipher
+        let customCipherKey = try keyPair.privateKeyOpenSSHString(
+            comment: "test@example.com",
+            passphrase: "secret123",
+            cipher: "aes128-ctr"
+        )
+        XCTAssertTrue(customCipherKey.contains("BEGIN OPENSSH PRIVATE KEY"))
+    }
+    
     // MARK: - Ed25519 Key Generation Tests
     
     func testGenerateEd25519() throws {

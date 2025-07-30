@@ -67,9 +67,8 @@ public struct SSHKeyPair: Sendable {
         
         switch keyType {
         case .rsa:
-            // RSA keys need to be wrapped in OpenSSH format
-            // This would require implementing OpenSSH key serialization for RSA
-            throw SSHKeyGeneratorError.unsupportedExportFormat("OpenSSH format for RSA keys not yet implemented")
+            let rsaKey = underlyingPrivateKey as! Insecure.RSA.PrivateKey
+            return try rsaKey.makeSSHRepresentation(comment: comment, passphrase: passphrase, cipher: actualCipher)
             
         case .ed25519:
             let ed25519Key = underlyingPrivateKey as! Curve25519.Signing.PrivateKey
