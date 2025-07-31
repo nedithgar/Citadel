@@ -173,9 +173,9 @@ extension P256.Signing {
                 return false
             }
             
-            // Create signature from r and s components
-            let signature = rData + sData
-            guard let ecdsaSignature = try? P256.Signing.ECDSASignature(rawRepresentation: signature) else {
+            // Create ASN.1 DER encoded signature from r and s components
+            let derSignature = ECDSASignatureEncoding.encodeSignature(r: rData, s: sData)
+            guard let ecdsaSignature = try? P256.Signing.ECDSASignature(derRepresentation: derSignature) else {
                 return false
             }
             
@@ -354,9 +354,9 @@ extension P384.Signing {
                 return false
             }
             
-            // Create signature from r and s components
-            let signature = rData + sData
-            guard let ecdsaSignature = try? P384.Signing.ECDSASignature(rawRepresentation: signature) else {
+            // Create ASN.1 DER encoded signature from r and s components
+            let derSignature = ECDSASignatureEncoding.encodeSignature(r: rData, s: sData)
+            guard let ecdsaSignature = try? P384.Signing.ECDSASignature(derRepresentation: derSignature) else {
                 return false
             }
             
@@ -535,9 +535,9 @@ extension P521.Signing {
                 return false
             }
             
-            // Create signature from r and s components
-            let signature = rData + sData
-            guard let ecdsaSignature = try? P521.Signing.ECDSASignature(rawRepresentation: signature) else {
+            // Create ASN.1 DER encoded signature from r and s components
+            let derSignature = ECDSASignatureEncoding.encodeSignature(r: rData, s: sData)
+            guard let ecdsaSignature = try? P521.Signing.ECDSASignature(derRepresentation: derSignature) else {
                 return false
             }
             
