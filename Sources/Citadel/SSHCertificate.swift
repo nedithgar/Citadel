@@ -28,6 +28,7 @@ public struct SSHCertificate {
         reserved: Data,
         signatureKey: Data,
         signature: Data,
+        signatureType: String? = nil,
         publicKey: Data?
     ) {
         self.nonce = nonce
@@ -42,6 +43,7 @@ public struct SSHCertificate {
         self.reserved = reserved
         self.signatureKey = signatureKey
         self.signature = signature
+        self.signatureType = signatureType
         self.publicKey = publicKey
     }
     
@@ -80,6 +82,9 @@ public struct SSHCertificate {
     
     /// CA signature
     public let signature: Data
+    
+    /// Signature algorithm type (e.g., "ssh-rsa", "rsa-sha2-256", "ssh-ed25519")
+    public let signatureType: String?
     
     /// The embedded public key data
     public let publicKey: Data?
@@ -227,6 +232,9 @@ public struct SSHCertificate {
         }
         self.signature = signature
         
+        // Extract signature type from the signature blob
+        self.signatureType = Self.extractSignatureType(from: signature)
+        
         // Verify CA signature
         let signedLength = originalBuffer.readableBytes - buffer.readableBytes - signature.count - 4
         let signedData = Data(originalBuffer.readBytes(length: signedLength)!)
@@ -288,6 +296,12 @@ public struct SSHCertificate {
         }
         
         throw SSHCertificateError.invalidSignatureKey
+    }
+    
+    /// Extract signature type from signature blob
+    private static func extractSignatureType(from signature: Data) -> String? {
+        var sigBuffer = ByteBuffer(data: signature)
+        return sigBuffer.readSSHString()
     }
     
     /// Normalize ECDSA signature component to expected size
@@ -411,6 +425,25 @@ public struct SSHCertificate {
     
     // MARK: - Certificate Validation Methods
     
+    /// Check if the certificate's signature type is allowed
+    /// - Parameter allowedAlgorithms: Comma-separated list of allowed signature algorithms (e.g., "ssh-rsa,rsa-sha2-256,rsa-sha2-512")
+    /// - Returns: true if the signature type is allowed, false otherwise
+    public func checkSignatureType(allowedAlgorithms: String?) -> Bool {
+        // If no allowed algorithms are specified, accept any
+        guard let allowed = allowedAlgorithms, !allowed.isEmpty else {
+            return true
+        }
+        
+        // If we don't have a signature type, reject
+        guard let sigType = self.signatureType else {
+            return false
+        }
+        
+        // Check if the signature type matches any allowed algorithm
+        let allowedList = allowed.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        return allowedList.contains(sigType)
+    }
+    
     /// Verify the certificate is signed by a trusted CA
     public func verifyCertificateSignature(trustedCAs: [NIOSSHPublicKey]) throws {
         // Check if we have any trusted CAs configured
@@ -532,7 +565,8 @@ public struct SSHCertificate {
         clientAddress: String,
         trustedCAs: [NIOSSHPublicKey],
         currentTime: UInt64? = nil,
-        requirePrincipal: Bool = true
+        requirePrincipal: Bool = true,
+        allowedSignatureAlgorithms: String? = nil
     ) throws -> CertificateConstraints {
         // 1. Verify certificate type (user vs host)
         guard self.type == .user else {
@@ -545,16 +579,23 @@ public struct SSHCertificate {
         // 2. Verify CA signature
         try self.verifyCertificateSignature(trustedCAs: trustedCAs)
         
-        // 3. Check time validity
+        // 3. Check if signature algorithm is allowed
+        if !self.checkSignatureType(allowedAlgorithms: allowedSignatureAlgorithms) {
+            throw SSHCertificateError.disallowedSignatureAlgorithm(
+                algorithm: self.signatureType ?? "unknown"
+            )
+        }
+        
+        // 4. Check time validity
         try self.validateTimeConstraints(currentTime: currentTime)
         
-        // 4. Validate principal
+        // 5. Validate principal
         try self.validatePrincipal(username: username, requirePrincipal: requirePrincipal)
         
-        // 5. Check source address if restricted
+        // 6. Check source address if restricted
         try self.validateSourceAddress(clientAddress)
         
-        // 6. Validate and return constraints for enforcement
+        // 7. Validate and return constraints for enforcement
         return try CertificateConstraints(from: self)
     }
 }
@@ -650,6 +691,7 @@ public enum SSHCertificateError: Error, Equatable {
     case wrongCertificateType(expected: SSHCertificate.CertificateType, actual: SSHCertificate.CertificateType)
     case sourceAddressNotAllowed(clientAddress: String, allowedAddresses: [String])
     case unknownCriticalOption(String)
+    case disallowedSignatureAlgorithm(algorithm: String)
 }
 
 // MARK: - Private extensions for certificate parsing

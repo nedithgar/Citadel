@@ -306,4 +306,87 @@ final class SSHCertificateRealTests: XCTestCase {
             }
         }
     }
+    
+    // MARK: - Signature Type Tests
+    
+    func testSignatureTypeExtraction() throws {
+        // Test Ed25519 certificate - should have ssh-ed25519 signature type
+        let ed25519CertData = try TestCertificateHelper.loadCertificate(filename: "user_ed25519-cert.pub")
+        let ed25519Cert = try SSHCertificate(from: ed25519CertData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")
+        XCTAssertEqual(ed25519Cert.signatureType, "ssh-ed25519")
+        
+        // Test P256 certificate - should have ecdsa-sha2-nistp256 signature type
+        let p256CertData = try TestCertificateHelper.loadCertificate(filename: "user_ecdsa_p256-cert.pub")
+        let p256Cert = try SSHCertificate(from: p256CertData, expectedKeyType: "ecdsa-sha2-nistp256-cert-v01@openssh.com")
+        XCTAssertEqual(p256Cert.signatureType, "ecdsa-sha2-nistp256")
+        
+        // Test P384 certificate - should have ecdsa-sha2-nistp384 signature type
+        let p384CertData = try TestCertificateHelper.loadCertificate(filename: "user_ecdsa_p384-cert.pub")
+        let p384Cert = try SSHCertificate(from: p384CertData, expectedKeyType: "ecdsa-sha2-nistp384-cert-v01@openssh.com")
+        XCTAssertEqual(p384Cert.signatureType, "ecdsa-sha2-nistp384")
+        
+        // Test P521 certificate - should have ecdsa-sha2-nistp521 signature type
+        let p521CertData = try TestCertificateHelper.loadCertificate(filename: "user_ecdsa_p521-cert.pub")
+        let p521Cert = try SSHCertificate(from: p521CertData, expectedKeyType: "ecdsa-sha2-nistp521-cert-v01@openssh.com")
+        XCTAssertEqual(p521Cert.signatureType, "ecdsa-sha2-nistp521")
+        
+        // Test RSA certificate - could be ssh-rsa, rsa-sha2-256, or rsa-sha2-512
+        let rsaCertData = try TestCertificateHelper.loadCertificate(filename: "user_rsa-cert.pub")
+        let rsaCert = try SSHCertificate(from: rsaCertData, expectedKeyType: "ssh-rsa-cert-v01@openssh.com")
+        XCTAssertNotNil(rsaCert.signatureType)
+        XCTAssertTrue(["ssh-rsa", "rsa-sha2-256", "rsa-sha2-512"].contains(rsaCert.signatureType!))
+    }
+    
+    func testSignatureTypeValidation() throws {
+        let certData = try TestCertificateHelper.loadCertificate(filename: "user_ed25519-cert.pub")
+        let certificate = try SSHCertificate(from: certData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")
+        
+        // Test with allowed algorithms
+        XCTAssertTrue(certificate.checkSignatureType(allowedAlgorithms: "ssh-ed25519,ssh-rsa"))
+        XCTAssertTrue(certificate.checkSignatureType(allowedAlgorithms: "ssh-ed25519"))
+        
+        // Test with disallowed algorithms
+        XCTAssertFalse(certificate.checkSignatureType(allowedAlgorithms: "ssh-rsa,rsa-sha2-256"))
+        XCTAssertFalse(certificate.checkSignatureType(allowedAlgorithms: "ecdsa-sha2-nistp256"))
+        
+        // Test with nil/empty allowed algorithms (should accept any)
+        XCTAssertTrue(certificate.checkSignatureType(allowedAlgorithms: nil))
+        XCTAssertTrue(certificate.checkSignatureType(allowedAlgorithms: ""))
+    }
+    
+    func testSignatureTypeInValidateForAuthentication() throws {
+        let certData = try TestCertificateHelper.loadCertificate(filename: "user_ed25519-cert.pub")
+        let certificate = try SSHCertificate(from: certData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")
+        let caPublicKey = try TestCertificateHelper.loadPublicKey(name: "ca_ed25519")
+        
+        // Test with allowed signature algorithm
+        // Use a fixed time within the certificate validity period to avoid expiration
+        let fixedTime = certificate.validAfter + 1800 // 30 minutes after valid_after
+        XCTAssertNoThrow(
+            try certificate.validateForAuthentication(
+                username: "testuser",
+                clientAddress: "127.0.0.1",
+                trustedCAs: [caPublicKey],
+                currentTime: fixedTime,
+                allowedSignatureAlgorithms: "ssh-ed25519,ssh-rsa"
+            )
+        )
+        
+        // Test with disallowed signature algorithm
+        XCTAssertThrowsError(
+            try certificate.validateForAuthentication(
+                username: "testuser",
+                clientAddress: "127.0.0.1",
+                trustedCAs: [caPublicKey],
+                currentTime: fixedTime,
+                allowedSignatureAlgorithms: "ssh-rsa,rsa-sha2-256"
+            )
+        ) { error in
+            guard case SSHCertificateError.disallowedSignatureAlgorithm(let algorithm) = error else {
+                XCTFail("Expected disallowedSignatureAlgorithm error, got \(error)")
+                return
+            }
+            XCTAssertEqual(algorithm, "ssh-ed25519")
+        }
+    }
 }
