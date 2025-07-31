@@ -562,12 +562,12 @@ public struct SSHCertificate {
         // 5. Check source address if restricted
         try self.validateSourceAddress(clientAddress)
         
-        // 6. Return constraints for enforcement
-        return CertificateConstraints(from: self.criticalOptions)
+        // 6. Validate and return constraints for enforcement
+        return try CertificateConstraints(from: self)
     }
 }
 
-/// Certificate constraints parsed from critical options
+/// Certificate constraints parsed from critical options and extensions
 public struct CertificateConstraints {
     public let forceCommand: String?
     public let sourceAddresses: [String]?
@@ -576,10 +576,23 @@ public struct CertificateConstraints {
     public let permitAgentForwarding: Bool
     public let permitX11Forwarding: Bool
     public let permitUserRC: Bool
+    public let verifyRequired: Bool
     
-    init(from criticalOptions: [(String, Data)]) {
+    /// Known critical options as per OpenSSH
+    private static let knownCriticalOptions: Set<String> = [
+        "force-command",
+        "source-address",
+        "verify-required"
+    ]
+    
+    init(from certificate: SSHCertificate) throws {
+        // First validate critical options
         var options: [String: Data] = [:]
-        for (key, value) in criticalOptions {
+        for (key, value) in certificate.criticalOptions {
+            // Check if this is an unknown critical option
+            if !Self.knownCriticalOptions.contains(key) {
+                throw SSHCertificateError.unknownCriticalOption(key)
+            }
             options[key] = value
         }
         
@@ -598,12 +611,15 @@ public struct CertificateConstraints {
             }?
             .components(separatedBy: ",")
         
-        // Default to restrictive if option present
-        self.permitPTY = options["no-pty"] == nil
-        self.permitPortForwarding = options["no-port-forwarding"] == nil
-        self.permitAgentForwarding = options["no-agent-forwarding"] == nil
-        self.permitX11Forwarding = options["no-x11-forwarding"] == nil
-        self.permitUserRC = options["no-user-rc"] == nil
+        self.verifyRequired = options["verify-required"] != nil
+        
+        // Parse permissions from extensions (OpenSSH behavior)
+        // If extension is present, permission is granted
+        self.permitPTY = certificate.permitPty
+        self.permitPortForwarding = certificate.permitPortForwarding
+        self.permitAgentForwarding = certificate.permitAgentForwarding
+        self.permitX11Forwarding = certificate.permitX11Forwarding
+        self.permitUserRC = certificate.permitUserRc
     }
 }
 
@@ -641,6 +657,7 @@ public enum SSHCertificateError: Error, Equatable {
     case principalMismatch(username: String, allowedPrincipals: [String])
     case wrongCertificateType(expected: SSHCertificate.CertificateType, actual: SSHCertificate.CertificateType)
     case sourceAddressNotAllowed(clientAddress: String, allowedAddresses: [String])
+    case unknownCriticalOption(String)
 }
 
 // MARK: - Private extensions for certificate parsing

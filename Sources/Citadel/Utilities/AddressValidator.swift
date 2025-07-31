@@ -219,7 +219,7 @@ public struct AddressValidator {
 extension SSHCertificate {
     /// Enhanced source address validation using OpenSSH-compatible matching
     public func validateSourceAddressEnhanced(_ clientAddress: String) throws {
-        let constraints = CertificateConstraints(from: self.criticalOptions)
+        let constraints = try CertificateConstraints(from: self)
         
         guard let allowedAddresses = constraints.sourceAddresses, !allowedAddresses.isEmpty else {
             return // No source address restriction

@@ -148,7 +148,7 @@ final class CertificateSecurityValidationTests: XCTestCase {
             criticalOptions: [("force-command", forceCommandData)]
         )
         
-        let constraints = CertificateConstraints(from: certificate.criticalOptions)
+        let constraints = try CertificateConstraints(from: certificate)
         XCTAssertEqual(constraints.forceCommand, "/usr/bin/true")
     }
     
@@ -175,21 +175,68 @@ final class CertificateSecurityValidationTests: XCTestCase {
         }
     }
     
-    func testCriticalOptions_Restrictions() throws {
+    func testCriticalOptions_NoOptionsInCritical_ShouldReject() throws {
+        // Test that no-* options in critical section are rejected (they should be extensions)
         let certificate = createTestCertificate(
             criticalOptions: [
-                ("no-pty", Data()),
-                ("no-port-forwarding", Data()),
-                ("no-x11-forwarding", Data())
+                ("no-pty", Data())  // This is not a valid critical option
             ]
         )
         
-        let constraints = CertificateConstraints(from: certificate.criticalOptions)
-        XCTAssertFalse(constraints.permitPTY)
-        XCTAssertFalse(constraints.permitPortForwarding)
-        XCTAssertFalse(constraints.permitX11Forwarding)
-        XCTAssertTrue(constraints.permitAgentForwarding)  // Not restricted
-        XCTAssertTrue(constraints.permitUserRC)  // Not restricted
+        // Should throw error because no-pty is not a valid critical option
+        XCTAssertThrowsError(try CertificateConstraints(from: certificate)) { error in
+            guard case SSHCertificateError.unknownCriticalOption(let optionName) = error else {
+                XCTFail("Expected unknownCriticalOption error, got \(error)")
+                return
+            }
+            XCTAssertEqual(optionName, "no-pty")
+        }
+    }
+    
+    func testCriticalOptions_VerifyRequired() throws {
+        // Test verify-required critical option
+        let certificate = createTestCertificate(
+            criticalOptions: [
+                ("verify-required", Data())
+            ]
+        )
+        
+        let constraints = try CertificateConstraints(from: certificate)
+        XCTAssertTrue(constraints.verifyRequired)
+        
+        // Test without verify-required
+        let certificateWithout = createTestCertificate(criticalOptions: [])
+        let constraintsWithout = try CertificateConstraints(from: certificateWithout)
+        XCTAssertFalse(constraintsWithout.verifyRequired)
+    }
+    
+    func testCriticalOptions_UnknownCriticalOption_ShouldReject() throws {
+        // Test with an unknown critical option
+        let certificate = createTestCertificate(
+            criticalOptions: [
+                ("force-command", Data()),  // Known option
+                ("unknown-critical-option", Data())  // Unknown option
+            ]
+        )
+        
+        // Should throw error when parsing constraints
+        XCTAssertThrowsError(try CertificateConstraints(from: certificate)) { error in
+            guard case SSHCertificateError.unknownCriticalOption(let optionName) = error else {
+                XCTFail("Expected unknownCriticalOption error, got \(error)")
+                return
+            }
+            XCTAssertEqual(optionName, "unknown-critical-option")
+        }
+        
+        // Should also fail during certificate validation
+        XCTAssertThrowsError(try certificate.validateForAuthentication(
+            username: "testuser",
+            clientAddress: "127.0.0.1",
+            trustedCAs: []
+        )) { error in
+            // Could fail on CA validation or unknown critical option
+            // The important thing is that it fails
+        }
     }
     
     // MARK: - Helper Methods

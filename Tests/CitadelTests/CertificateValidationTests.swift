@@ -216,7 +216,7 @@ final class CertificateValidationTests: XCTestCase {
         let certificate = try SSHCertificate(from: certData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")
         
         // Check force-command is parsed
-        let constraints = CertificateConstraints(from: certificate.criticalOptions)
+        let constraints = try CertificateConstraints(from: certificate)
         XCTAssertNotNil(constraints.forceCommand)
         XCTAssertEqual(constraints.forceCommand, "/bin/date")
     }
@@ -278,12 +278,14 @@ final class CertificateValidationTests: XCTestCase {
             publicKey: Data(repeating: 0, count: 32)
         )
         
-        let constraints = CertificateConstraints(from: certificate.criticalOptions)
-        XCTAssertFalse(constraints.permitPTY)
-        XCTAssertFalse(constraints.permitPortForwarding)
-        XCTAssertFalse(constraints.permitAgentForwarding)
-        XCTAssertTrue(constraints.permitX11Forwarding)  // Not restricted
-        XCTAssertTrue(constraints.permitUserRC)  // Not restricted
+        // These no-* options are not valid critical options in OpenSSH
+        // They should cause the certificate to be rejected
+        XCTAssertThrowsError(try CertificateConstraints(from: certificate)) { error in
+            guard case SSHCertificateError.unknownCriticalOption = error else {
+                XCTFail("Expected unknownCriticalOption error, got \(error)")
+                return
+            }
+        }
     }
     
     // MARK: - Complete Validation Tests

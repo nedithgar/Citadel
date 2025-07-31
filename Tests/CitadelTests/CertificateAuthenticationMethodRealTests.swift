@@ -247,7 +247,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
         )
         
         // Verify the certificate has the expected critical options
-        let constraints = CertificateConstraints(from: certificate.certificate.criticalOptions)
+        let constraints = try CertificateConstraints(from: certificate.certificate)
         XCTAssertEqual(constraints.forceCommand, "/bin/date")
         XCTAssertEqual(constraints.sourceAddresses, ["192.168.1.0/24", "10.0.0.1"])
     }
