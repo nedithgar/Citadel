@@ -515,22 +515,8 @@ public struct SSHCertificate {
     
     /// Helper function for wildcard pattern matching
     private func matchPattern(pattern: String, string: String) -> Bool {
-        // This is a simplified version of OpenSSH's match_pattern()
-        if pattern == "*" {
-            return true
-        }
-        if pattern.contains("*") || pattern.contains("?") {
-            // Convert wildcard pattern to regex
-            let regexPattern = pattern
-                .replacingOccurrences(of: ".", with: "\\.")
-                .replacingOccurrences(of: "*", with: ".*")
-                .replacingOccurrences(of: "?", with: ".")
-            
-            let regex = try? NSRegularExpression(pattern: "^" + regexPattern + "$", options: [])
-            let range = NSRange(location: 0, length: string.utf16.count)
-            return regex?.firstMatch(in: string, options: [], range: range) != nil
-        }
-        return pattern == string
+        // Use the new OpenSSH-compatible pattern matcher
+        return PatternMatcher.match(string, pattern: pattern)
     }
     
     /// Validate source address constraints
@@ -541,24 +527,8 @@ public struct SSHCertificate {
     
     /// Helper function for address pattern matching
     private func matchAddress(pattern: String, address: String) -> Bool {
-        // Handle CIDR notation (e.g., 192.168.1.0/24)
-        if pattern.contains("/") {
-            return CIDRMatcher.matches(address: address, cidr: pattern)
-        }
-        
-        // Handle wildcard patterns (e.g., 192.168.*.*)
-        if pattern.contains("*") {
-            let regexPattern = pattern
-                .replacingOccurrences(of: ".", with: "\\.")
-                .replacingOccurrences(of: "*", with: "[0-9]+")
-            
-            let regex = try? NSRegularExpression(pattern: "^" + regexPattern + "$", options: [])
-            let range = NSRange(location: 0, length: address.utf16.count)
-            return regex?.firstMatch(in: address, options: [], range: range) != nil
-        }
-        
-        // Exact match
-        return pattern == address
+        // Use the new OpenSSH-compatible address matcher
+        return PatternMatcher.matchAddress(address, pattern: pattern)
     }
     
     /// Complete certificate validation for authentication

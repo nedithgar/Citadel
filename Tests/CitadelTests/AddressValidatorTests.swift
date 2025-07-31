@@ -181,4 +181,67 @@ final class AddressValidatorTests: XCTestCase {
         let bastionNegFirst = "!198.51.100.200,203.0.113.5,198.51.100.0/24"
         XCTAssertEqual(AddressValidator.matchAddressList("198.51.100.200", against: bastionNegFirst), -1)
     }
+    
+    // MARK: - Strict CIDR List Tests (like OpenSSH's addr_match_cidr_list)
+    
+    func testStrictCIDRMatching() {
+        // Valid CIDR matches
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.0/24"), 1)
+        XCTAssertEqual(AddressValidator.matchCIDRList("10.0.0.5", against: "10.0.0.0/8"), 1)
+        XCTAssertEqual(AddressValidator.matchCIDRList("2001:db8::1", against: "2001:db8::/32"), 1)
+        
+        // No match
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.2.100", against: "192.168.1.0/24"), 0)
+        XCTAssertEqual(AddressValidator.matchCIDRList("10.0.0.5", against: "192.168.1.0/24"), 0)
+        
+        // Validation only (nil address)
+        XCTAssertEqual(AddressValidator.matchCIDRList(nil, against: "192.168.1.0/24"), 0)
+        XCTAssertEqual(AddressValidator.matchCIDRList(nil, against: "192.168.1.0/24,10.0.0.0/8"), 0)
+        
+        // Invalid formats return -1
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.*"), -1) // Wildcards not allowed
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "!192.168.1.0/24"), -1) // Negation not allowed
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.100"), -1) // Must be CIDR notation
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.0/33"), -1) // Invalid prefix
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "invalid.address/24"), -1) // Invalid address
+    }
+    
+    func testStrictCIDRValidation() {
+        // Valid CIDR lists
+        XCTAssertTrue(AddressValidator.validateCIDRList("192.168.1.0/24"))
+        XCTAssertTrue(AddressValidator.validateCIDRList("192.168.1.0/24,10.0.0.0/8"))
+        XCTAssertTrue(AddressValidator.validateCIDRList("2001:db8::/32"))
+        XCTAssertTrue(AddressValidator.validateCIDRList("0.0.0.0/0")) // Allow all IPv4
+        XCTAssertTrue(AddressValidator.validateCIDRList("::/0")) // Allow all IPv6
+        
+        // Invalid CIDR lists
+        XCTAssertFalse(AddressValidator.validateCIDRList("")) // Empty
+        XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.100")) // Not CIDR notation
+        XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.*")) // Wildcards not allowed
+        XCTAssertFalse(AddressValidator.validateCIDRList("!192.168.1.0/24")) // Negation not allowed
+        XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.0/33")) // Invalid prefix
+        XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.0/24,,10.0.0.0/8")) // Empty entries not allowed
+        XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.0/24,")) // Trailing comma creates empty entry
+        XCTAssertFalse(AddressValidator.validateCIDRList("2001:db8::/129")) // Invalid IPv6 prefix
+        XCTAssertFalse(AddressValidator.validateCIDRList("invalid.address/24")) // Invalid address
+        XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.0/24,invalid-chars!@#")) // Invalid characters
+    }
+    
+    func testCertificateSourceAddressValidation() {
+        // Test realistic certificate source-address scenarios
+        let corporateNetwork = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+        XCTAssertEqual(AddressValidator.matchCIDRList("10.5.5.5", against: corporateNetwork), 1)
+        XCTAssertEqual(AddressValidator.matchCIDRList("172.20.1.100", against: corporateNetwork), 1)
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.100.50", against: corporateNetwork), 1)
+        XCTAssertEqual(AddressValidator.matchCIDRList("203.0.113.5", against: corporateNetwork), 0) // Public IP
+        
+        // Validation mode (used when parsing certificates)
+        XCTAssertEqual(AddressValidator.matchCIDRList(nil, against: corporateNetwork), 0)
+        XCTAssertTrue(AddressValidator.validateCIDRList(corporateNetwork))
+        
+        // Invalid certificate source-address patterns should be rejected
+        let invalidPattern = "10.0.0.0/8,192.168.*.* " // Contains wildcard
+        XCTAssertEqual(AddressValidator.matchCIDRList(nil, against: invalidPattern), -1)
+        XCTAssertFalse(AddressValidator.validateCIDRList(invalidPattern))
+    }
 }

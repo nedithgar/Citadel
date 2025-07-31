@@ -60,6 +60,47 @@ public struct AddressValidator {
         return 0 // No match found
     }
     
+    /// Match an address against a strict CIDR-only list
+    /// This is equivalent to OpenSSH's addr_match_cidr_list()
+    /// - Only CIDR notation is allowed (no wildcards, no negation)
+    /// - Used for certificate source-address validation
+    /// 
+    /// Returns:
+    /// - 1: Match found
+    /// - 0: No match
+    /// - -1: Invalid list format
+    public static func matchCIDRList(_ address: String?, against list: String) -> Int {
+        // Validate the list structure first
+        guard validateCIDRList(list) else {
+            return -1
+        }
+        
+        // If address is nil, we're just validating the list structure
+        guard let address = address else {
+            return 0
+        }
+        
+        let patterns = list.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        
+        for pattern in patterns {
+            // Skip empty patterns
+            if pattern.isEmpty {
+                continue
+            }
+            
+            // Only CIDR patterns are allowed (must contain '/')
+            guard pattern.contains("/") else {
+                return -1 // Invalid format
+            }
+            
+            if matchCIDR(address: address, cidr: pattern) {
+                return 1
+            }
+        }
+        
+        return 0 // No match found
+    }
+    
     /// Validate that a source address list has valid syntax
     /// Used for validating certificate critical options
     public static func validateAddressList(_ list: String) -> Bool {
@@ -99,6 +140,76 @@ public struct AddressValidator {
                 if !isValidIPAddress(checkPattern) {
                     return false
                 }
+            }
+        }
+        
+        return true
+    }
+    
+    /// Match an address against a CIDR list (strict mode - no wildcards)
+    /// This is used for certificate validation where only CIDR notation is allowed
+    /// Matches OpenSSH's addr_match_cidr_list() behavior
+    /// - Parameters:
+    ///   - address: The IP address to check
+    ///   - cidrList: Comma-separated list of CIDR patterns (no wildcards, no negation)
+    /// - Returns: 1 if match, 0 if no match, -1 on error
+    public static func matchCIDRList(_ address: String, against cidrList: String) -> Int {
+        // Validate CIDR list format first
+        guard validateCIDRList(cidrList) else {
+            return -1 // Invalid format
+        }
+        
+        let patterns = cidrList.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        
+        for pattern in patterns {
+            guard !pattern.isEmpty else { continue }
+            
+            // No negation allowed in strict CIDR mode
+            if pattern.hasPrefix("!") {
+                return -1
+            }
+            
+            // Must contain / for CIDR notation
+            guard pattern.contains("/") else {
+                return -1
+            }
+            
+            if matchCIDR(address: address, cidr: pattern) {
+                return 1
+            }
+        }
+        
+        return 0
+    }
+    
+    /// Validate a CIDR list has valid format (strict mode)
+    /// Matches OpenSSH's validation in addr_match_cidr_list()
+    public static func validateCIDRList(_ cidrList: String) -> Bool {
+        // Check for valid characters only
+        let validChars = CharacterSet(charactersIn: "0123456789abcdefABCDEF.:/,")
+        let invalidChars = CharacterSet(charactersIn: cidrList).subtracting(validChars)
+        guard invalidChars.isEmpty else {
+            return false
+        }
+        
+        let patterns = cidrList.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        
+        for pattern in patterns {
+            guard !pattern.isEmpty else { continue }
+            
+            // No negation allowed in strict mode
+            if pattern.hasPrefix("!") {
+                return false
+            }
+            
+            // Must be valid CIDR
+            if !isValidCIDR(pattern) {
+                return false
+            }
+            
+            // Check length limits (INET6_ADDRSTRLEN + 3)
+            if pattern.count > 46 + 3 { // IPv6 max length + "/128"
+                return false
             }
         }
         
@@ -163,16 +274,8 @@ public struct AddressValidator {
     }
     
     private static func matchWildcard(address: String, pattern: String) -> Bool {
-        // Convert wildcard pattern to regex
-        let escapedPattern = NSRegularExpression.escapedPattern(for: pattern)
-        let regexPattern = "^" + escapedPattern.replacingOccurrences(of: "\\*", with: "[0-9]+") + "$"
-        
-        guard let regex = try? NSRegularExpression(pattern: regexPattern, options: []) else {
-            return false
-        }
-        
-        let range = NSRange(location: 0, length: address.utf16.count)
-        return regex.firstMatch(in: address, options: [], range: range) != nil
+        // Use the new OpenSSH-compatible pattern matcher
+        return PatternMatcher.match(address, pattern: pattern)
     }
     
     private static func isValidCIDR(_ cidr: String) -> Bool {
@@ -228,27 +331,25 @@ extension SSHCertificate {
         // Join the allowed addresses back into a comma-separated list
         let addressList = allowedAddresses.joined(separator: ",")
         
-        // Use the enhanced validator
-        let result = AddressValidator.matchAddressList(clientAddress, against: addressList)
+        // For certificates, OpenSSH uses strict CIDR matching (no wildcards)
+        // This matches the behavior of addr_match_cidr_list() in auth-options.c
+        let result = AddressValidator.matchCIDRList(clientAddress, against: addressList)
         
         switch result {
         case 1:
             // Positive match - allowed
             return
-        case -1:
-            // Negated match - explicitly denied
-            throw SSHCertificateError.sourceAddressNotAllowed(
-                clientAddress: clientAddress,
-                allowedAddresses: allowedAddresses
-            )
         case 0:
             // No match - not in allowed list
             throw SSHCertificateError.sourceAddressNotAllowed(
                 clientAddress: clientAddress,
                 allowedAddresses: allowedAddresses
             )
+        case -1:
+            // Invalid CIDR list format
+            throw SSHCertificateError.invalidCriticalOption
         default:
-            // Invalid list format
+            // Should not happen
             throw SSHCertificateError.invalidCriticalOption
         }
     }
