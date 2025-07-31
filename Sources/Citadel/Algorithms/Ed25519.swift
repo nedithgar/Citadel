@@ -93,7 +93,7 @@ public enum Ed25519 {
             
             // Write certificate fields
             certBuffer.writeInteger(certificate.serial)
-            certBuffer.writeInteger(certificate.type)
+            certBuffer.writeInteger(certificate.type.rawValue)
             certBuffer.writeSSHString(certificate.keyId)
             
             // Write valid principals

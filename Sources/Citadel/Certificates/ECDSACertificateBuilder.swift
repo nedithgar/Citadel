@@ -27,7 +27,7 @@ public enum ECDSACertificateBuilder {
         
         // Write certificate fields
         buffer.writeInteger(certificate.certificate.serial)
-        buffer.writeInteger(certificate.certificate.type)
+        buffer.writeInteger(certificate.certificate.type.rawValue)
         buffer.writeSSHString(certificate.certificate.keyId)
         
         // Write valid principals
@@ -89,7 +89,7 @@ public enum ECDSACertificateBuilder {
         
         // Write certificate fields
         buffer.writeInteger(certificate.certificate.serial)
-        buffer.writeInteger(certificate.certificate.type)
+        buffer.writeInteger(certificate.certificate.type.rawValue)
         buffer.writeSSHString(certificate.certificate.keyId)
         
         // Write valid principals
@@ -151,7 +151,7 @@ public enum ECDSACertificateBuilder {
         
         // Write certificate fields
         buffer.writeInteger(certificate.certificate.serial)
-        buffer.writeInteger(certificate.certificate.type)
+        buffer.writeInteger(certificate.certificate.type.rawValue)
         buffer.writeSSHString(certificate.certificate.keyId)
         
         // Write valid principals

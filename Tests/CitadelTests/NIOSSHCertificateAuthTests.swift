@@ -113,7 +113,7 @@ private extension SSHCertificate {
         return SSHCertificate(
             nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 1,
-            type: 1, // SSH_CERT_TYPE_USER
+            type: .user, // SSH_CERT_TYPE_USER
             keyId: "test-key-id",
             validPrincipals: ["testuser"],
             validAfter: now - 3600,

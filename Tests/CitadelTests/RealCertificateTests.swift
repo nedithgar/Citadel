@@ -311,7 +311,7 @@ final class RealCertificateTests: XCTestCase {
         let certificate = try Ed25519.CertificatePublicKey(certificateData: certBase64Data)
         
         // Verify it's a host certificate (type 2)
-        XCTAssertEqual(certificate.certificate.type, 2, "Should be a host certificate")
+        XCTAssertEqual(certificate.certificate.type, .host, "Should be a host certificate")
         XCTAssertEqual(certificate.certificate.keyId, "test-host")
         
         // Verify valid principals (hostnames)

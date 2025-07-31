@@ -619,7 +619,7 @@ extension Insecure.RSA {
             certBuffer.writeInteger(certificate.serial)
             
             // Write type
-            certBuffer.writeInteger(certificate.type)
+            certBuffer.writeInteger(certificate.type.rawValue)
             
             // Write key ID
             certBuffer.writeSSHString(certificate.keyId)

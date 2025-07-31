@@ -97,7 +97,7 @@ extension P256.Signing {
             
             // Write certificate fields
             certBuffer.writeInteger(certificate.serial)
-            certBuffer.writeInteger(certificate.type)
+            certBuffer.writeInteger(certificate.type.rawValue)
             certBuffer.writeSSHString(certificate.keyId)
             
             // Write valid principals
@@ -278,7 +278,7 @@ extension P384.Signing {
             
             // Write certificate fields
             certBuffer.writeInteger(certificate.serial)
-            certBuffer.writeInteger(certificate.type)
+            certBuffer.writeInteger(certificate.type.rawValue)
             certBuffer.writeSSHString(certificate.keyId)
             
             // Write valid principals
@@ -459,7 +459,7 @@ extension P521.Signing {
             
             // Write certificate fields
             certBuffer.writeInteger(certificate.serial)
-            certBuffer.writeInteger(certificate.type)
+            certBuffer.writeInteger(certificate.type.rawValue)
             certBuffer.writeSSHString(certificate.keyId)
             
             // Write valid principals
