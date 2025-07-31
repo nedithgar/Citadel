@@ -100,10 +100,11 @@ public struct SSHCertificate {
             throw SSHCertificateError.invalidCertificateType
         }
         
-        // Skip nonce for now - it's parsed after the public key, per OpenSSH
-        guard let _ = buffer.readSSHData() else {
+        // Read nonce as the first field after key type (per OpenSSH format)
+        guard let nonce = buffer.readSSHData() else {
             throw SSHCertificateError.missingNonce
         }
+        self.nonce = nonce
         
         // Read public key
         // Different key types store public keys differently in certificates
@@ -136,15 +137,6 @@ public struct SSHCertificate {
             }
             self.publicKey = publicKeyData
         }
-        
-        // Now read the nonce (after public key, matching OpenSSH order)
-        // Reset to original buffer and skip past key type
-        var nonceBuffer = originalBuffer
-        _ = nonceBuffer.readSSHString() // skip key type
-        guard let nonce = nonceBuffer.readSSHData() else {
-            throw SSHCertificateError.missingNonce
-        }
-        self.nonce = nonce
         
         // Read serial
         guard let serial = buffer.readInteger(as: UInt64.self) else {
