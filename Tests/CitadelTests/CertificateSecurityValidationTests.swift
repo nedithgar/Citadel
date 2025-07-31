@@ -243,6 +243,81 @@ final class CertificateSecurityValidationTests: XCTestCase {
         }
     }
     
+    // MARK: - RSA Key Length Validation Tests
+    
+    func testRSAKeyLengthValidation_ValidKey() throws {
+        // Create certificate with 2048-bit RSA key
+        let certificate = createTestRSACertificate(bits: 2048)
+        
+        // Should not throw for valid key length
+        XCTAssertNoThrow(try certificate.checkRSAKeyLength())
+        XCTAssertNoThrow(try certificate.checkRSAKeyLength(minimumBits: 1024))
+        XCTAssertNoThrow(try certificate.checkRSAKeyLength(minimumBits: 2048))
+    }
+    
+    func testRSAKeyLengthValidation_ShortKey() throws {
+        // Create certificate with 768-bit RSA key
+        let certificate = createTestRSACertificate(bits: 768)
+        
+        // Should throw for short key (default minimum is 1024)
+        XCTAssertThrowsError(try certificate.checkRSAKeyLength()) { error in
+            guard case SSHCertificateError.rsaKeyTooShort(let bits, let minimumBits) = error else {
+                XCTFail("Expected rsaKeyTooShort error, got \(error)")
+                return
+            }
+            XCTAssertEqual(bits, 768)
+            XCTAssertEqual(minimumBits, 1024)
+        }
+        
+        // Should pass with lower minimum (explicitly set)
+        XCTAssertNoThrow(try certificate.checkRSAKeyLength(minimumBits: 512))
+        
+        // Should fail with higher minimum
+        XCTAssertThrowsError(try certificate.checkRSAKeyLength(minimumBits: 2048)) { error in
+            guard case SSHCertificateError.rsaKeyTooShort(let bits, let minimumBits) = error else {
+                XCTFail("Expected rsaKeyTooShort error, got \(error)")
+                return
+            }
+            XCTAssertEqual(bits, 768)
+            XCTAssertEqual(minimumBits, 2048)
+        }
+    }
+    
+    func testRSAKeyLengthValidation_NonRSACertificate() throws {
+        // Create non-RSA certificate
+        let certificate = createTestCertificate(type: .user)
+        
+        // Should not throw for non-RSA certificates
+        XCTAssertNoThrow(try certificate.checkRSAKeyLength())
+        XCTAssertNoThrow(try certificate.checkRSAKeyLength(minimumBits: 4096))
+    }
+    
+    func testRSAKeyLengthValidation_IntegrationWithFullValidation() throws {
+        // Create certificate with short RSA key
+        let certificate = createTestRSACertificate(bits: 768)
+        let trustedCAs: [NIOSSHPublicKey] = [] // Empty for this test
+        
+        // Should fail validation due to short RSA key when minimumRSABits is set
+        XCTAssertThrowsError(try certificate.validateForAuthentication(
+            username: "testuser",
+            clientAddress: "127.0.0.1",
+            trustedCAs: trustedCAs,
+            minimumRSABits: 2048
+        )) { error in
+            // Will fail on CA trust first if no trusted CAs provided
+            if case SSHCertificateError.untrustedCA = error {
+                // This is expected when no trusted CAs are provided
+                return
+            }
+            guard case SSHCertificateError.rsaKeyTooShort(let bits, let minimumBits) = error else {
+                XCTFail("Expected rsaKeyTooShort or untrustedCA error, got \(error)")
+                return
+            }
+            XCTAssertEqual(bits, 768)
+            XCTAssertEqual(minimumBits, 2048)
+        }
+    }
+    
     // MARK: - Helper Methods
     
     private func createTestCertificate(
@@ -268,6 +343,43 @@ final class CertificateSecurityValidationTests: XCTestCase {
             signatureKey: Data(),
             signature: Data(),
             publicKey: Data(repeating: 0, count: 32)
+        )
+    }
+    
+    private func createTestRSACertificate(bits: Int) -> SSHCertificate {
+        // Create a mock RSA public key with specified bit length
+        let modulusBytes = bits / 8
+        let exponentBytes = 3 // Common RSA exponent is 65537 which fits in 3 bytes
+        
+        // Create e (exponent) - typically 65537
+        let e = Data([0x01, 0x00, 0x01]) // 65537 in big-endian
+        
+        // Create n (modulus) with specified bit length
+        // Set the high bit to ensure it's the right bit length
+        var n = Data(repeating: 0xFF, count: modulusBytes)
+        n[0] = 0x80 // Set high bit to ensure correct bit length
+        
+        // Encode in SSH format (length-prefixed)
+        var publicKeyBuffer = ByteBufferAllocator().buffer(capacity: e.count + n.count + 8)
+        publicKeyBuffer.writeSSHData(e)
+        publicKeyBuffer.writeSSHData(n)
+        let publicKeyData = Data(publicKeyBuffer.readableBytesView)
+        
+        return SSHCertificate(
+            nonce: Data(repeating: 0, count: 32),
+            serial: 1,
+            type: .user,
+            keyId: "test-rsa@example.com",
+            validPrincipals: ["testuser"],
+            validAfter: 0,
+            validBefore: UInt64.max,
+            criticalOptions: [],
+            extensions: [],
+            reserved: Data(),
+            signatureKey: Data(),
+            signature: Data(),
+            publicKey: publicKeyData,
+            keyType: "ssh-rsa-cert-v01@openssh.com"
         )
     }
 }

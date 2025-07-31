@@ -29,7 +29,8 @@ public struct SSHCertificate {
         signatureKey: Data,
         signature: Data,
         signatureType: String? = nil,
-        publicKey: Data?
+        publicKey: Data?,
+        keyType: String? = nil
     ) {
         self.nonce = nonce
         self.serial = serial
@@ -45,6 +46,7 @@ public struct SSHCertificate {
         self.signature = signature
         self.signatureType = signatureType
         self.publicKey = publicKey
+        self._keyType = keyType
     }
     
     /// Certificate nonce (32 random bytes)
@@ -91,6 +93,9 @@ public struct SSHCertificate {
     
     /// Store the original certificate blob for signature verification
     internal var certBlob: Data?
+    
+    /// Stores the key type for RSA validation (used when created via convenience init)
+    private var _keyType: String?
     
     /// Initialize from raw certificate data with expected key type
     public init(from data: Data, expectedKeyType: String) throws {
@@ -561,6 +566,74 @@ public struct SSHCertificate {
         return PatternMatcher.matchAddress(address, pattern: pattern)
     }
     
+    /// Check RSA key length - equivalent to OpenSSH's sshkey_check_rsa_length
+    /// - Parameter minimumBits: Minimum allowed RSA key size in bits (default: 1024)
+    /// - Throws: SSHCertificateError.rsaKeyTooShort if the key is too short
+    public func checkRSAKeyLength(minimumBits: Int = 1024) throws {
+        // Only check RSA certificates
+        guard let keyTypeString = self.keyType,
+              (keyTypeString.contains("ssh-rsa-cert") || keyTypeString.contains("rsa-sha2")) else {
+            // Not an RSA certificate, no check needed
+            return
+        }
+        
+        // Parse the public key to get the modulus
+        guard let publicKey = self.publicKey else {
+            throw SSHCertificateError.invalidPublicKey
+        }
+        
+        var buffer = ByteBuffer(data: publicKey)
+        
+        // Read e and n components
+        guard let _ = buffer.readSSHData(),
+              let nData = buffer.readSSHData() else {
+            throw SSHCertificateError.invalidPublicKey
+        }
+        
+        // Calculate the bit length of the modulus (n)
+        // The bit length is approximately log2(n) = (number of bytes * 8) - leading zero bits
+        let modulusBits = nData.count * 8 - countLeadingZeroBits(in: nData)
+        
+        // Check against minimum requirement (OpenSSH default is 1024 bits)
+        if modulusBits < minimumBits {
+            throw SSHCertificateError.rsaKeyTooShort(bits: modulusBits, minimumBits: minimumBits)
+        }
+    }
+    
+    /// Count leading zero bits in a byte array
+    private func countLeadingZeroBits(in data: Data) -> Int {
+        guard !data.isEmpty else { return 0 }
+        
+        var leadingZeroBits = 0
+        for byte in data {
+            if byte == 0 {
+                leadingZeroBits += 8
+            } else {
+                // Count leading zero bits in the first non-zero byte
+                var mask: UInt8 = 0x80
+                while (byte & mask) == 0 && mask > 0 {
+                    leadingZeroBits += 1
+                    mask >>= 1
+                }
+                break
+            }
+        }
+        return leadingZeroBits
+    }
+    
+    /// Key type extracted from the certificate - stored for RSA length validation
+    private var keyType: String? {
+        // Use stored key type if available (from convenience init)
+        if let storedKeyType = _keyType {
+            return storedKeyType
+        }
+        
+        // Extract key type from the beginning of the certificate blob
+        guard let certBlob = self.certBlob else { return nil }
+        var buffer = ByteBuffer(data: certBlob)
+        return buffer.readSSHString()
+    }
+    
     /// Complete certificate validation for authentication
     public func validateForAuthentication(
         username: String,
@@ -568,7 +641,8 @@ public struct SSHCertificate {
         trustedCAs: [NIOSSHPublicKey],
         currentTime: UInt64? = nil,
         requirePrincipal: Bool = true,
-        allowedSignatureAlgorithms: String? = nil
+        allowedSignatureAlgorithms: String? = nil,
+        minimumRSABits: Int = 1024
     ) throws -> CertificateConstraints {
         // 1. Verify certificate type (user vs host)
         guard self.type == .user else {
@@ -588,16 +662,19 @@ public struct SSHCertificate {
             )
         }
         
-        // 4. Check time validity
+        // 4. Check RSA key length (if applicable)
+        try self.checkRSAKeyLength(minimumBits: minimumRSABits)
+        
+        // 5. Check time validity
         try self.validateTimeConstraints(currentTime: currentTime)
         
-        // 5. Validate principal
+        // 6. Validate principal
         try self.validatePrincipal(username: username, requirePrincipal: requirePrincipal)
         
-        // 6. Check source address if restricted
+        // 7. Check source address if restricted
         try self.validateSourceAddress(clientAddress)
         
-        // 7. Validate and return constraints for enforcement
+        // 8. Validate and return constraints for enforcement
         return try CertificateConstraints(from: self)
     }
 }
@@ -694,6 +771,7 @@ public enum SSHCertificateError: Error, Equatable {
     case sourceAddressNotAllowed(clientAddress: String, allowedAddresses: [String])
     case unknownCriticalOption(String)
     case disallowedSignatureAlgorithm(algorithm: String)
+    case rsaKeyTooShort(bits: Int, minimumBits: Int)
 }
 
 // MARK: - Private extensions for certificate parsing
