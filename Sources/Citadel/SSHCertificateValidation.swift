@@ -135,7 +135,7 @@ public struct SSHCertificateValidator {
             
             // Validate hostname if provided
             if let hostname = context.hostname {
-                try certificate.validatePrincipal(username: hostname, wildcardAllowed: true)
+                try certificate.validatePrincipal(username: hostname, wildcardAllowed: true, requirePrincipal: false)
             }
             
             // Check source address if provided

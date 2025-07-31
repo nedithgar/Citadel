@@ -78,13 +78,17 @@ final class CertificateSecurityValidationTests: XCTestCase {
     func testPrincipalValidation_EmptyPrincipals() throws {
         let certificate = createTestCertificate(validPrincipals: [])
         
-        // Should fail with empty principals (OpenSSH behavior)
+        // Should fail with empty principals when requirePrincipal is true (default, OpenSSH TrustedUserCAKeys behavior)
         XCTAssertThrowsError(try certificate.validatePrincipal(username: "anyuser")) { error in
             guard case SSHCertificateError.noPrincipalsSpecified = error else {
                 XCTFail("Expected noPrincipalsSpecified error, got \(error)")
                 return
             }
         }
+        
+        // Should succeed with empty principals when requirePrincipal is false (OpenSSH authorized_keys behavior)
+        XCTAssertNoThrow(try certificate.validatePrincipal(username: "anyuser", requirePrincipal: false))
+        XCTAssertNoThrow(try certificate.validatePrincipal(username: "differentuser", requirePrincipal: false))
     }
     
     func testPrincipalValidation_WildcardPatterns() throws {

@@ -488,14 +488,17 @@ public struct SSHCertificate {
     }
     
     /// Validate principal (username/hostname)
-    public func validatePrincipal(username: String, wildcardAllowed: Bool = false) throws {
-        // If no principals are specified, reject the certificate
-        // OpenSSH behavior: empty principals list means no one can use this cert
-        guard !self.validPrincipals.isEmpty else {
-            throw SSHCertificateError.noPrincipalsSpecified
+    public func validatePrincipal(username: String, wildcardAllowed: Bool = false, requirePrincipal: Bool = true) throws {
+        // OpenSSH behavior: empty principals handling depends on require_principal flag
+        if self.validPrincipals.isEmpty {
+            if requirePrincipal {
+                throw SSHCertificateError.noPrincipalsSpecified
+            }
+            // If require_principal is false, empty principals are allowed (matches any username)
+            return
         }
         
-        // Check if username matches any principal
+        // If principals are specified, check if username matches any principal
         let principalMatches = self.validPrincipals.contains { principal in
             if wildcardAllowed {
                 // OpenSSH uses match_pattern() for wildcard matching
@@ -536,7 +539,8 @@ public struct SSHCertificate {
         username: String,
         clientAddress: String,
         trustedCAs: [NIOSSHPublicKey],
-        currentTime: UInt64? = nil
+        currentTime: UInt64? = nil,
+        requirePrincipal: Bool = true
     ) throws -> CertificateConstraints {
         // 1. Verify certificate type (user vs host)
         guard self.type == .user else {
@@ -553,7 +557,7 @@ public struct SSHCertificate {
         try self.validateTimeConstraints(currentTime: currentTime)
         
         // 4. Validate principal
-        try self.validatePrincipal(username: username)
+        try self.validatePrincipal(username: username, requirePrincipal: requirePrincipal)
         
         // 5. Check source address if restricted
         try self.validateSourceAddress(clientAddress)
