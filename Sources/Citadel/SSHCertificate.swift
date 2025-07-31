@@ -96,8 +96,8 @@ public struct SSHCertificate {
     public init(from data: Data, expectedKeyType: String) throws {
         var buffer = ByteBuffer(data: data)
         
-        // Store the original buffer for signature verification
-        var originalBuffer = buffer
+        // Store the original data for signature verification
+        let originalData = data
         
         // Read the key type
         guard let keyType = buffer.readSSHString(),
@@ -236,8 +236,10 @@ public struct SSHCertificate {
         self.signatureType = Self.extractSignatureType(from: signature)
         
         // Verify CA signature
-        let signedLength = originalBuffer.readableBytes - buffer.readableBytes - signature.count - 4
-        let signedData = Data(originalBuffer.readBytes(length: signedLength)!)
+        // The signed data is everything before the signature field
+        // Calculate length: total data length - remaining buffer - signature length - 4 bytes for signature length prefix
+        let signedLength = originalData.count - buffer.readableBytes - signature.count - 4
+        let signedData = originalData.prefix(signedLength)
         
         // Parse CA key from signatureKey blob
         guard let caKey = try? Self.parseCAKey(from: signatureKey) else {
@@ -245,12 +247,12 @@ public struct SSHCertificate {
         }
         
         // Verify signature
-        guard try Self.verifySignature(signature, for: signedData, with: caKey) else {
+        guard try Self.verifySignature(signature, for: Data(signedData), with: caKey) else {
             throw SSHCertificateError.invalidSignature
         }
         
         // Store the certificate blob for later validation
-        self.certBlob = data
+        self.certBlob = originalData
     }
     
     /// Parse CA key from blob
