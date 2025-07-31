@@ -23,11 +23,25 @@ final class CertificateValidationTests: XCTestCase {
     }
     
     func testCertificateSignatureVerification_UntrustedCA_Fails() throws {
-        // SKIP TEST: CA comparison is not fully implemented yet
-        // The verifyCertificateSignature method has a TODO for comparing CAs
-        // Currently it only verifies that trustedCAs is not empty and that
-        // the signature was valid during parsing
-        throw XCTSkip("CA comparison not fully implemented - see TODO in verifyCertificateSignature")
+        // Load a test certificate
+        let certData = try TestCertificateHelper.loadCertificateData(name: "user_ed25519-cert")
+        let certificate = try SSHCertificate(from: certData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")
+        
+        // Load a different CA public key (not the one that signed the certificate)
+        // For this test, we'll create a new key pair that wasn't used to sign the certificate
+        let wrongCAPrivateKey = Curve25519.Signing.PrivateKey()
+        let wrongCAData = wrongCAPrivateKey.publicKey.rawRepresentation
+        var wrongCABuffer = ByteBufferAllocator().buffer(capacity: 128)
+        wrongCABuffer.writeSSHString("ssh-ed25519")
+        wrongCABuffer.writeSSHData(wrongCAData)
+        let wrongCAString = "ssh-ed25519 \(wrongCABuffer.readData(length: wrongCABuffer.readableBytes)!.base64EncodedString())"
+        let wrongCA = try NIOSSHPublicKey(openSSHPublicKey: wrongCAString)
+        let trustedCAs = [wrongCA]
+        
+        // Should fail with wrong CA
+        XCTAssertThrowsError(try certificate.verifyCertificateSignature(trustedCAs: trustedCAs)) { error in
+            XCTAssertEqual(error as? SSHCertificateError, SSHCertificateError.untrustedCA)
+        }
     }
     
     func testCertificateSignatureVerification_EmptyTrustedCAs_Fails() throws {
@@ -42,6 +56,78 @@ final class CertificateValidationTests: XCTestCase {
         XCTAssertThrowsError(try certificate.verifyCertificateSignature(trustedCAs: trustedCAs)) { error in
             XCTAssertEqual(error as? SSHCertificateError, SSHCertificateError.untrustedCA)
         }
+    }
+    
+    func testCertificateSignatureVerification_RSA_ValidCA_Succeeds() throws {
+        // Skip RSA test if RSA is not registered with NIOSSH
+        // RSA support requires registering RSA algorithms with NIOSSHAlgorithms
+        
+        // First, try to register RSA support
+        NIOSSHAlgorithms.register(publicKey: Insecure.RSA.PublicKey.self, signature: Insecure.RSA.Signature.self)
+        
+        // Load an RSA test certificate and its CA
+        let certData = try TestCertificateHelper.loadCertificateData(name: "user_rsa-cert")
+        let certificate = try SSHCertificate(from: certData, expectedKeyType: "ssh-rsa-cert-v01@openssh.com")
+        
+        // Load the RSA CA public key
+        let caPublicKey = try TestCertificateHelper.loadPublicKey(name: "ca_rsa")
+        let trustedCAs = [caPublicKey]
+        
+        // Should succeed with correct CA
+        XCTAssertNoThrow(try certificate.verifyCertificateSignature(trustedCAs: trustedCAs))
+    }
+    
+    func testCertificateSignatureVerification_ECDSA_ValidCA_Succeeds() throws {
+        // Load an ECDSA test certificate and its CA
+        let certData = try TestCertificateHelper.loadCertificateData(name: "user_ecdsa_p256-cert")
+        let certificate = try SSHCertificate(from: certData, expectedKeyType: "ecdsa-sha2-nistp256-cert-v01@openssh.com")
+        
+        // Load the ECDSA CA public key
+        let caPublicKey = try TestCertificateHelper.loadPublicKey(name: "ca_ecdsa_p256")
+        let trustedCAs = [caPublicKey]
+        
+        // Should succeed with correct CA
+        XCTAssertNoThrow(try certificate.verifyCertificateSignature(trustedCAs: trustedCAs))
+    }
+    
+    func testCertificateSignatureVerification_MultipleTrustedCAs_FindsCorrectOne() throws {
+        // Load a test certificate
+        let certData = try TestCertificateHelper.loadCertificateData(name: "user_ed25519-cert")
+        let certificate = try SSHCertificate(from: certData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")
+        
+        // Create multiple CA keys, including the correct one
+        let wrongCA1PrivKey = Curve25519.Signing.PrivateKey()
+        let wrongCA1Data = wrongCA1PrivKey.publicKey.rawRepresentation
+        var wrongCA1Buffer = ByteBufferAllocator().buffer(capacity: 128)
+        wrongCA1Buffer.writeSSHString("ssh-ed25519")
+        wrongCA1Buffer.writeSSHData(wrongCA1Data)
+        let wrongCA1String = "ssh-ed25519 \(wrongCA1Buffer.readData(length: wrongCA1Buffer.readableBytes)!.base64EncodedString())"
+        let wrongCA1 = try NIOSSHPublicKey(openSSHPublicKey: wrongCA1String)
+        
+        let wrongCA2PrivKey = P256.Signing.PrivateKey()
+        let wrongCA2Data = wrongCA2PrivKey.publicKey.x963Representation
+        var wrongCA2Buffer = ByteBufferAllocator().buffer(capacity: 256)
+        wrongCA2Buffer.writeSSHString("ecdsa-sha2-nistp256")
+        wrongCA2Buffer.writeSSHString("nistp256")
+        wrongCA2Buffer.writeSSHData(wrongCA2Data)
+        let wrongCA2String = "ecdsa-sha2-nistp256 \(wrongCA2Buffer.readData(length: wrongCA2Buffer.readableBytes)!.base64EncodedString())"
+        let wrongCA2 = try NIOSSHPublicKey(openSSHPublicKey: wrongCA2String)
+        
+        let correctCA = try TestCertificateHelper.loadPublicKey(name: "ca_ed25519")
+        
+        let wrongCA3PrivKey = P384.Signing.PrivateKey()
+        let wrongCA3Data = wrongCA3PrivKey.publicKey.x963Representation
+        var wrongCA3Buffer = ByteBufferAllocator().buffer(capacity: 256)
+        wrongCA3Buffer.writeSSHString("ecdsa-sha2-nistp384")
+        wrongCA3Buffer.writeSSHString("nistp384")
+        wrongCA3Buffer.writeSSHData(wrongCA3Data)
+        let wrongCA3String = "ecdsa-sha2-nistp384 \(wrongCA3Buffer.readData(length: wrongCA3Buffer.readableBytes)!.base64EncodedString())"
+        let wrongCA3 = try NIOSSHPublicKey(openSSHPublicKey: wrongCA3String)
+        
+        let trustedCAs = [wrongCA1, wrongCA2, correctCA, wrongCA3]
+        
+        // Should succeed when correct CA is in the list
+        XCTAssertNoThrow(try certificate.verifyCertificateSignature(trustedCAs: trustedCAs))
     }
     
     // MARK: - Time-based Validation Tests

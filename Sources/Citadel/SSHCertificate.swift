@@ -1,6 +1,8 @@
 import Foundation
+import NIO
 import NIOCore
 import Crypto
+import _CryptoExtras
 import CCryptoBoringSSL
 import NIOSSH
 
@@ -424,22 +426,46 @@ public struct SSHCertificate {
             throw SSHCertificateError.untrustedCA
         }
         
-        // Parse CA key from signatureKey blob
+        // Verify that we can parse CA key from signatureKey blob
+        // (The actual signature verification was already done during certificate parsing)
         guard let _ = try? Self.parseCAKey(from: signatureKey) else {
             throw SSHCertificateError.invalidSignatureKey
         }
         
-        // For now, we trust the signature verification done during parsing
-        // In a complete implementation, we would need to:
-        // 1. Convert the CA key to NIOSSHPublicKey format
-        // 2. Compare against trusted CAs list
-        // 3. Re-verify the signature if needed
+        // Convert the CA key to NIOSSHPublicKey format by serializing and parsing
+        // This is necessary because NIOSSHPublicKey's BackingKey enum is internal
+        let caPublicKey: NIOSSHPublicKey
         
-        // TODO: Implement proper CA key comparison
-        // This requires converting between internal key representations and NIOSSHPublicKey
-        // For now, we rely on the signature verification done during certificate parsing
+        // Build the OpenSSH format string from the signatureKey data
+        var keyBuffer = ByteBuffer(data: signatureKey)
+        guard let keyType = keyBuffer.readSSHString() else {
+            throw SSHCertificateError.invalidSignatureKey
+        }
         
-        // Signature is already verified during parsing
+        // Create the OpenSSH format string
+        let base64Key = signatureKey.base64EncodedString()
+        let openSSHString = "\(keyType) \(base64Key)"
+        
+        do {
+            caPublicKey = try NIOSSHPublicKey(openSSHPublicKey: openSSHString)
+        } catch {
+            throw SSHCertificateError.invalidSignatureKey
+        }
+        
+        // Check if the CA key is in the trusted CAs list
+        var caKeyFound = false
+        for trustedCA in trustedCAs {
+            if trustedCA == caPublicKey {
+                caKeyFound = true
+                break
+            }
+        }
+        
+        if !caKeyFound {
+            throw SSHCertificateError.untrustedCA
+        }
+        
+        // The signature was already verified during parsing
     }
     
     /// Validate certificate time constraints
