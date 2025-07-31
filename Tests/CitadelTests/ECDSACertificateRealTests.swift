@@ -52,16 +52,17 @@ final class ECDSACertificateRealTests: XCTestCase {
             )
         )
         
-        // Test invalid username
+        // Test invalid username with validation enabled
         XCTAssertThrowsError(
             try SSHAuthenticationMethod.p256Certificate(
                 username: "wronguser",
                 privateKey: privateKey,
-                certificate: certificate
+                certificate: certificate,
+                validateCertificate: true
             )
         ) { error in
-            guard case SSHCertificateValidationError.invalidPrincipal = error else {
-                XCTFail("Expected invalidPrincipal error, got \(error)")
+            guard case SSHCertificateError.principalMismatch = error else {
+                XCTFail("Expected principalMismatch error, got \(error)")
                 return
             }
         }
@@ -118,14 +119,20 @@ final class ECDSACertificateRealTests: XCTestCase {
             )
         )
         
-        // Test invalid principal
+        // Test invalid principal with validation enabled
         XCTAssertThrowsError(
             try SSHAuthenticationMethod.p384Certificate(
                 username: "guest",
                 privateKey: privateKey,
-                certificate: certificate
+                certificate: certificate,
+                validateCertificate: true
             )
-        )
+        ) { error in
+            guard case SSHCertificateError.principalMismatch = error else {
+                XCTFail("Expected principalMismatch error, got \(error)")
+                return
+            }
+        }
     }
     
     // MARK: - P521 Certificate Tests

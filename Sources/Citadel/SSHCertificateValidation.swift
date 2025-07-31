@@ -1,5 +1,6 @@
 import Foundation
 import NIOCore
+import NIOSSH
 
 /// SSH Certificate validation utilities
 public extension SSHCertificate {
@@ -89,65 +90,96 @@ public struct SSHCertificateValidationContext {
     public let hostname: String?
     public let sourceAddress: String?
     public let timestamp: UInt64
+    public let trustedCAs: [NIOSSHPublicKey]
     
-    public init(username: String? = nil, hostname: String? = nil, sourceAddress: String? = nil, timestamp: UInt64? = nil) {
+    public init(username: String? = nil, hostname: String? = nil, sourceAddress: String? = nil, timestamp: UInt64? = nil, trustedCAs: [NIOSSHPublicKey] = []) {
         self.username = username
         self.hostname = hostname  
         self.sourceAddress = sourceAddress
         self.timestamp = timestamp ?? UInt64(Date().timeIntervalSince1970)
+        self.trustedCAs = trustedCAs
     }
 }
 
 /// Certificate validator
 public struct SSHCertificateValidator {
     
-    /// Validate a certificate in a given context
+    /// Validate a certificate in a given context (legacy method for compatibility)
     public static func validate(_ certificate: SSHCertificate, context: SSHCertificateValidationContext) throws {
-        // Check time validity
-        if !certificate.isValid(at: context.timestamp) {
-            if context.timestamp < certificate.validAfter {
-                throw SSHCertificateValidationError.notYetValid
-            } else {
-                throw SSHCertificateValidationError.expired
-            }
-        }
-        
-        // Check principal for user certificates
+        // For user certificates
         if certificate.type == .user, let username = context.username {
-            if !certificate.isValid(for: username) {
-                throw SSHCertificateValidationError.invalidPrincipal(username)
-            }
+            // Use the new comprehensive validation
+            let clientAddress = context.sourceAddress ?? "0.0.0.0"
+            _ = try certificate.validateForAuthentication(
+                username: username,
+                clientAddress: clientAddress,
+                trustedCAs: context.trustedCAs,
+                currentTime: context.timestamp
+            )
         }
-        
-        // Check principal for host certificates
-        if certificate.type == .host, let hostname = context.hostname {
-            if !certificate.isValid(for: hostname) {
-                throw SSHCertificateValidationError.invalidPrincipal(hostname)
-            }
-        }
-        
-        // Check source address restriction if present
-        if let allowedAddresses = certificate.sourceAddress,
-           let actualAddress = context.sourceAddress {
-            // Parse the allowed addresses (comma-separated list with possible CIDR notation)
-            let allowed = allowedAddresses.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-            var isAllowed = false
-            
-            for pattern in allowed {
-                if pattern == actualAddress {
-                    isAllowed = true
-                    break
-                }
-                // Check CIDR notation
-                if pattern.contains("/") && CIDRMatcher.matches(address: actualAddress, cidr: pattern) {
-                    isAllowed = true
-                    break
-                }
+        // For host certificates
+        else if certificate.type == .host {
+            // Verify certificate type
+            guard certificate.type == .host else {
+                throw SSHCertificateValidationError.invalidCertificateType(
+                    expected: .host,
+                    got: certificate.type
+                )
             }
             
-            if !isAllowed {
-                throw SSHCertificateValidationError.invalidSourceAddress(actualAddress)
+            // Verify CA signature
+            try certificate.verifyCertificateSignature(trustedCAs: context.trustedCAs)
+            
+            // Check time validity
+            try certificate.validateTimeConstraints(currentTime: context.timestamp)
+            
+            // Validate hostname if provided
+            if let hostname = context.hostname {
+                try certificate.validatePrincipal(username: hostname, wildcardAllowed: true)
+            }
+            
+            // Check source address if provided
+            if let sourceAddress = context.sourceAddress {
+                try certificate.validateSourceAddress(sourceAddress)
             }
         }
+    }
+    
+    /// Validate a user certificate with full security checks
+    public static func validateUserCertificate(
+        _ certificate: SSHCertificate,
+        username: String,
+        clientAddress: String,
+        trustedCAs: [NIOSSHPublicKey]
+    ) throws -> CertificateConstraints {
+        return try certificate.validateForAuthentication(
+            username: username,
+            clientAddress: clientAddress,
+            trustedCAs: trustedCAs
+        )
+    }
+    
+    /// Validate a host certificate
+    public static func validateHostCertificate(
+        _ certificate: SSHCertificate,
+        hostname: String,
+        trustedCAs: [NIOSSHPublicKey]
+    ) throws {
+        // Verify certificate type
+        guard certificate.type == .host else {
+            throw SSHCertificateError.wrongCertificateType(
+                expected: .host,
+                actual: certificate.type
+            )
+        }
+        
+        // Verify CA signature
+        try certificate.verifyCertificateSignature(trustedCAs: trustedCAs)
+        
+        // Check time validity
+        try certificate.validateTimeConstraints()
+        
+        // Validate hostname with wildcard support
+        try certificate.validatePrincipal(username: hostname, wildcardAllowed: true)
     }
 }
