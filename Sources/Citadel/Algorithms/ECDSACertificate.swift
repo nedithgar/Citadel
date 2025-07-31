@@ -18,6 +18,9 @@ extension P256.Signing {
         /// The certificate data
         public let certificate: SSHCertificate
         
+        /// The original certificate data (for serialization)
+        private let originalCertificateData: Data
+        
         /// The raw representation of the public key
         public var rawRepresentation: Data {
             publicKey.x963Representation
@@ -25,6 +28,7 @@ extension P256.Signing {
         
         /// Initialize from raw certificate data
         public init(certificateData: Data) throws {
+            self.originalCertificateData = certificateData
             self.certificate = try SSHCertificate(from: certificateData, expectedKeyType: Self.publicKeyPrefix)
             
             // Extract the public key from the certificate
@@ -40,6 +44,8 @@ extension P256.Signing {
         public init(certificate: SSHCertificate, publicKey: P256.Signing.PublicKey) {
             self.certificate = certificate
             self.publicKey = publicKey
+            // When initialized this way, we need to serialize the certificate
+            self.originalCertificateData = Data()
         }
         
         // MARK: - NIOSSHPublicKeyProtocol conformance
@@ -69,17 +75,24 @@ extension P256.Signing {
         }
         
         public func write(to buffer: inout ByteBuffer) -> Int {
-            // Serialize the entire certificate
+            // If we have the original certificate data, use it directly
+            if !originalCertificateData.isEmpty {
+                return buffer.writeData(originalCertificateData)
+            }
+            
+            // Otherwise, serialize the certificate from its components
             var certBuffer = ByteBufferAllocator().buffer(capacity: 1024)
             
             // Write key type
             certBuffer.writeSSHString(CertificatePublicKey.publicKeyPrefix)
             
-            // Write nonce (32 random bytes)
-            let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
-            certBuffer.writeSSHData(nonce)
+            // Write nonce
+            certBuffer.writeSSHData(certificate.nonce)
             
-            // Write public key
+            // Write curve identifier
+            certBuffer.writeSSHString("nistp256")
+            
+            // Write EC point
             certBuffer.writeSSHData(publicKey.x963Representation)
             
             // Write certificate fields
@@ -186,6 +199,9 @@ extension P384.Signing {
         /// The certificate data
         public let certificate: SSHCertificate
         
+        /// The original certificate data (for serialization)
+        private let originalCertificateData: Data
+        
         /// The raw representation of the public key
         public var rawRepresentation: Data {
             publicKey.x963Representation
@@ -193,6 +209,7 @@ extension P384.Signing {
         
         /// Initialize from raw certificate data
         public init(certificateData: Data) throws {
+            self.originalCertificateData = certificateData
             self.certificate = try SSHCertificate(from: certificateData, expectedKeyType: Self.publicKeyPrefix)
             
             // Extract the public key from the certificate
@@ -208,6 +225,8 @@ extension P384.Signing {
         public init(certificate: SSHCertificate, publicKey: P384.Signing.PublicKey) {
             self.certificate = certificate
             self.publicKey = publicKey
+            // When initialized this way, we need to serialize the certificate
+            self.originalCertificateData = Data()
         }
         
         // MARK: - NIOSSHPublicKeyProtocol conformance
@@ -237,17 +256,24 @@ extension P384.Signing {
         }
         
         public func write(to buffer: inout ByteBuffer) -> Int {
-            // Serialize the entire certificate
+            // If we have the original certificate data, use it directly
+            if !originalCertificateData.isEmpty {
+                return buffer.writeData(originalCertificateData)
+            }
+            
+            // Otherwise, serialize the certificate from its components
             var certBuffer = ByteBufferAllocator().buffer(capacity: 1024)
             
             // Write key type
             certBuffer.writeSSHString(CertificatePublicKey.publicKeyPrefix)
             
-            // Write nonce (32 random bytes)
-            let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
-            certBuffer.writeSSHData(nonce)
+            // Write nonce
+            certBuffer.writeSSHData(certificate.nonce)
             
-            // Write public key
+            // Write curve identifier
+            certBuffer.writeSSHString("nistp384")
+            
+            // Write EC point
             certBuffer.writeSSHData(publicKey.x963Representation)
             
             // Write certificate fields
@@ -354,6 +380,9 @@ extension P521.Signing {
         /// The certificate data
         public let certificate: SSHCertificate
         
+        /// The original certificate data (for serialization)
+        private let originalCertificateData: Data
+        
         /// The raw representation of the public key
         public var rawRepresentation: Data {
             publicKey.x963Representation
@@ -361,6 +390,7 @@ extension P521.Signing {
         
         /// Initialize from raw certificate data
         public init(certificateData: Data) throws {
+            self.originalCertificateData = certificateData
             self.certificate = try SSHCertificate(from: certificateData, expectedKeyType: Self.publicKeyPrefix)
             
             // Extract the public key from the certificate
@@ -376,6 +406,8 @@ extension P521.Signing {
         public init(certificate: SSHCertificate, publicKey: P521.Signing.PublicKey) {
             self.certificate = certificate
             self.publicKey = publicKey
+            // When initialized this way, we need to serialize the certificate
+            self.originalCertificateData = Data()
         }
         
         // MARK: - NIOSSHPublicKeyProtocol conformance
@@ -405,17 +437,24 @@ extension P521.Signing {
         }
         
         public func write(to buffer: inout ByteBuffer) -> Int {
-            // Serialize the entire certificate
+            // If we have the original certificate data, use it directly
+            if !originalCertificateData.isEmpty {
+                return buffer.writeData(originalCertificateData)
+            }
+            
+            // Otherwise, serialize the certificate from its components
             var certBuffer = ByteBufferAllocator().buffer(capacity: 1024)
             
             // Write key type
             certBuffer.writeSSHString(CertificatePublicKey.publicKeyPrefix)
             
-            // Write nonce (32 random bytes)
-            let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
-            certBuffer.writeSSHData(nonce)
+            // Write nonce
+            certBuffer.writeSSHData(certificate.nonce)
             
-            // Write public key
+            // Write curve identifier
+            certBuffer.writeSSHString("nistp521")
+            
+            // Write EC point
             certBuffer.writeSSHData(publicKey.x963Representation)
             
             // Write certificate fields

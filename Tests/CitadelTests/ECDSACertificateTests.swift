@@ -91,6 +91,7 @@ final class ECDSACertificateTests: XCTestCase {
         let publicKey = privateKey.publicKey
         
         let certificate = SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 54321,
             type: 2, // host
             keyId: "host-certificate",
@@ -126,6 +127,7 @@ final class ECDSACertificateTests: XCTestCase {
         let publicKey2 = privateKey2.publicKey
         
         let certificate1 = SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 100,
             type: 1,
             keyId: "key1",
@@ -141,6 +143,7 @@ final class ECDSACertificateTests: XCTestCase {
         )
         
         let certificate2 = SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 100,
             type: 1,
             keyId: "key1",
@@ -156,6 +159,7 @@ final class ECDSACertificateTests: XCTestCase {
         )
         
         let certificate3 = SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 200, // Different serial
             type: 1,
             keyId: "key1",
@@ -368,6 +372,7 @@ final class ECDSACertificateTests: XCTestCase {
     func testCertificateValidityPeriod() throws {
         let now = UInt64(Date().timeIntervalSince1970)
         let certificate = SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 1,
             type: 1,
             keyId: "test",

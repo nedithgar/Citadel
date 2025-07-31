@@ -508,6 +508,9 @@ extension Insecure.RSA {
         /// The signature algorithm for this certificate
         public let signatureAlgorithm: SignatureHashAlgorithm
         
+        /// The original certificate data (for serialization)
+        private let originalCertificateData: Data
+        
         /// SSH certificate type identifier based on signature algorithm
         public static func publicKeyPrefix(for algorithm: SignatureHashAlgorithm) -> String {
             switch algorithm {
@@ -533,6 +536,7 @@ extension Insecure.RSA {
                 throw RSAError(message: "Algorithm must be a certificate type")
             }
             
+            self.originalCertificateData = certificateData
             self.signatureAlgorithm = algorithm
             let expectedPrefix = Self.publicKeyPrefix(for: algorithm)
             self.certificate = try SSHCertificate(from: certificateData, expectedKeyType: expectedPrefix)
@@ -551,6 +555,8 @@ extension Insecure.RSA {
             self.certificate = certificate
             self.publicKey = publicKey
             self.signatureAlgorithm = algorithm
+            // When initialized this way, we need to serialize the certificate
+            self.originalCertificateData = Data()
         }
         
         // MARK: - NIOSSHPublicKeyProtocol conformance
@@ -588,15 +594,19 @@ extension Insecure.RSA {
         }
         
         public func write(to buffer: inout ByteBuffer) -> Int {
-            // Create a buffer for the certificate
+            // If we have the original certificate data, use it directly
+            if !originalCertificateData.isEmpty {
+                return buffer.writeData(originalCertificateData)
+            }
+            
+            // Otherwise, serialize the certificate from its components
             var certBuffer = ByteBufferAllocator().buffer(capacity: 1024)
             
             // Write key type
             certBuffer.writeSSHString(Self.publicKeyPrefix(for: signatureAlgorithm))
             
-            // Write nonce (32 random bytes)
-            let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
-            certBuffer.writeSSHData(nonce)
+            // Write nonce
+            certBuffer.writeSSHData(certificate.nonce)
             
             // Write public key
             var publicKeyBuffer = ByteBufferAllocator().buffer(capacity: 256)

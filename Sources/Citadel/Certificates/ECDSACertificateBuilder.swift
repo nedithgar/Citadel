@@ -16,9 +16,8 @@ public enum ECDSACertificateBuilder {
         // Write key type
         buffer.writeSSHString("ecdsa-sha2-nistp256-cert-v01@openssh.com")
         
-        // Write nonce (use existing nonce if available)
-        let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
-        buffer.writeSSHString(nonce)
+        // Write nonce (use existing nonce from certificate)
+        buffer.writeSSHString(certificate.certificate.nonce)
         
         // Write curve identifier
         buffer.writeSSHString("nistp256")
@@ -79,9 +78,8 @@ public enum ECDSACertificateBuilder {
         // Write key type
         buffer.writeSSHString("ecdsa-sha2-nistp384-cert-v01@openssh.com")
         
-        // Write nonce
-        let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
-        buffer.writeSSHString(nonce)
+        // Write nonce (use existing nonce from certificate)
+        buffer.writeSSHString(certificate.certificate.nonce)
         
         // Write curve identifier
         buffer.writeSSHString("nistp384")
@@ -142,9 +140,8 @@ public enum ECDSACertificateBuilder {
         // Write key type
         buffer.writeSSHString("ecdsa-sha2-nistp521-cert-v01@openssh.com")
         
-        // Write nonce
-        let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
-        buffer.writeSSHString(nonce)
+        // Write nonce (use existing nonce from certificate)
+        buffer.writeSSHString(certificate.certificate.nonce)
         
         // Write curve identifier
         buffer.writeSSHString("nistp521")

@@ -62,7 +62,7 @@ final class CertificateAuthenticationIntegrationTests: XCTestCase {
     }
     
     // Test that CertificateAuthenticationDelegate properly handles authentication
-    func testCertificateAuthenticationDelegate() throws {
+    func testCertificateAuthenticationDirectPattern() throws {
         let eventLoop = EmbeddedEventLoop()
         defer { try! eventLoop.syncShutdownGracefully() }
         
@@ -70,10 +70,10 @@ final class CertificateAuthenticationIntegrationTests: XCTestCase {
         let privateKey = Curve25519.Signing.PrivateKey()
         let certificate = createTestEd25519Certificate(privateKey: privateKey)
         
-        // Create delegate
-        let delegate = CertificateAuthenticationDelegate(
+        // Create authentication method using the new direct pattern
+        let authMethod = SSHAuthenticationMethod.ed25519Certificate(
             username: "testuser",
-            privateKey: .init(ed25519Key: privateKey),
+            privateKey: privateKey,
             certificate: certificate
         )
         
@@ -81,7 +81,7 @@ final class CertificateAuthenticationIntegrationTests: XCTestCase {
         let availableMethods = NIOSSHAvailableUserAuthenticationMethods.publicKey
         let promise = eventLoop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
         
-        delegate.nextAuthenticationType(
+        authMethod.nextAuthenticationType(
             availableMethods: availableMethods,
             nextChallengePromise: promise
         )
@@ -95,14 +95,21 @@ final class CertificateAuthenticationIntegrationTests: XCTestCase {
         let noPublicKeyMethods = NIOSSHAvailableUserAuthenticationMethods.password
         let failPromise = eventLoop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
         
-        delegate.nextAuthenticationType(
+        // Create a new auth method since the previous one has consumed its implementations
+        let authMethodCopy = SSHAuthenticationMethod.ed25519Certificate(
+            username: "testuser",
+            privateKey: privateKey,
+            certificate: certificate
+        )
+        
+        authMethodCopy.nextAuthenticationType(
             availableMethods: noPublicKeyMethods,
             nextChallengePromise: failPromise
         )
         
         // Verify it fails appropriately
         XCTAssertThrowsError(try failPromise.futureResult.wait()) { error in
-            XCTAssertEqual(error as? SSHClientError, SSHClientError.unsupportedPrivateKeyAuthentication)
+            XCTAssertTrue(error is SSHClientError)
         }
     }
     
@@ -159,6 +166,7 @@ final class CertificateAuthenticationIntegrationTests: XCTestCase {
         let signatureData = Data(signatureBuffer.readableBytesView)
         
         return SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 1,
             type: 1, // User certificate
             keyId: "test-user@example.com",

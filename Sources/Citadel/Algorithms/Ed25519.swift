@@ -18,6 +18,9 @@ public enum Ed25519 {
         /// The certificate data
         public let certificate: SSHCertificate
         
+        /// The original certificate data (for serialization)
+        private let originalCertificateData: Data
+        
         /// The raw representation of the public key
         public var rawRepresentation: Data {
             publicKey.rawRepresentation
@@ -25,6 +28,7 @@ public enum Ed25519 {
         
         /// Initialize from raw certificate data
         public init(certificateData: Data) throws {
+            self.originalCertificateData = certificateData
             self.certificate = try SSHCertificate(from: certificateData, expectedKeyType: Self.publicKeyPrefix)
             
             // Extract the public key from the certificate
@@ -39,6 +43,8 @@ public enum Ed25519 {
         public init(certificate: SSHCertificate, publicKey: Curve25519.Signing.PublicKey) {
             self.certificate = certificate
             self.publicKey = publicKey
+            // When initialized this way, we need to serialize the certificate
+            self.originalCertificateData = Data()
         }
         
         // MARK: - NIOSSHPublicKeyProtocol conformance
@@ -68,15 +74,19 @@ public enum Ed25519 {
         }
         
         public func write(to buffer: inout ByteBuffer) -> Int {
-            // Serialize the entire certificate
+            // If we have the original certificate data, use it directly
+            if !originalCertificateData.isEmpty {
+                return buffer.writeData(originalCertificateData)
+            }
+            
+            // Otherwise, serialize the certificate from its components
             var certBuffer = ByteBufferAllocator().buffer(capacity: 1024)
             
             // Write key type
             certBuffer.writeSSHString(CertificatePublicKey.publicKeyPrefix)
             
-            // Write nonce (32 random bytes)
-            let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
-            certBuffer.writeSSHData(nonce)
+            // Write nonce
+            certBuffer.writeSSHData(certificate.nonce)
             
             // Write public key
             certBuffer.writeSSHData(publicKey.rawRepresentation)

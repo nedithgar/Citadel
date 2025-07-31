@@ -6,6 +6,7 @@ public struct SSHCertificate {
     
     /// Convenience initializer for creating certificates manually (for testing)
     public init(
+        nonce: Data,
         serial: UInt64,
         type: UInt32,
         keyId: String,
@@ -19,6 +20,7 @@ public struct SSHCertificate {
         signature: Data,
         publicKey: Data?
     ) {
+        self.nonce = nonce
         self.serial = serial
         self.type = type
         self.keyId = keyId
@@ -32,6 +34,9 @@ public struct SSHCertificate {
         self.signature = signature
         self.publicKey = publicKey
     }
+    
+    /// Certificate nonce (32 random bytes)
+    public let nonce: Data
     
     /// Certificate serial number
     public let serial: UInt64
@@ -80,9 +85,10 @@ public struct SSHCertificate {
         }
         
         // Read nonce
-        guard buffer.readSSHData() != nil else {
+        guard let nonce = buffer.readSSHData() else {
             throw SSHCertificateError.missingNonce
         }
+        self.nonce = nonce
         
         // Read public key
         // Different key types store public keys differently in certificates

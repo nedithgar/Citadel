@@ -43,6 +43,7 @@ final class CertificateAuthenticationTests: XCTestCase {
         let signatureData = Data(signatureBuffer.readableBytesView)
         
         return SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 1,
             type: 1, // User certificate
             keyId: "test-user@example.com",
@@ -258,6 +259,7 @@ final class CertificateAuthenticationTests: XCTestCase {
         
         // Create an expired certificate
         let expiredCert = SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 1,
             type: 1,
             keyId: "expired-cert",
@@ -274,6 +276,7 @@ final class CertificateAuthenticationTests: XCTestCase {
         
         // Create a not-yet-valid certificate
         let futureCert = SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 2,
             type: 1,
             keyId: "future-cert",
@@ -290,6 +293,7 @@ final class CertificateAuthenticationTests: XCTestCase {
         
         // Create a currently valid certificate
         let validCert = SSHCertificate(
+            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
             serial: 3,
             type: 1,
             keyId: "valid-cert",
