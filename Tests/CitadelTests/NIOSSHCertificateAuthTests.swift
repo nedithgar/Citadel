@@ -87,43 +87,4 @@ final class NIOSSHCertificateAuthTests: XCTestCase {
         
         try await group.shutdownGracefully()
     }
-    
-    func testCertificateConverterIntegration() throws {
-        // Test that certificate methods would use CertificateConverter
-        // The actual converter functionality is tested elsewhere
-        
-        // Create test keys
-        let ed25519Key = Curve25519.Signing.PrivateKey()
-        let ed25519Certificate = Ed25519.CertificatePublicKey(
-            certificate: SSHCertificate.createMockCertificate(),
-            publicKey: ed25519Key.publicKey
-        )
-        
-        // The actual certificate methods will use CertificateConverter.convertToNIOSSHCertifiedPublicKey
-        // to convert Citadel certificate types to NIOSSH types
-        XCTAssertNotNil(ed25519Certificate)
-    }
-}
-
-// Helper extension for creating mock certificates in tests
-private extension SSHCertificate {
-    static func createMockCertificate() -> SSHCertificate {
-        let now = UInt64(Date().timeIntervalSince1970)
-        
-        return SSHCertificate(
-            nonce: Data((0..<32).map { _ in UInt8.random(in: 0...255) }),
-            serial: 1,
-            type: 1, // SSH_CERT_TYPE_USER
-            keyId: "test-key-id",
-            validPrincipals: ["testuser"],
-            validAfter: now - 3600,
-            validBefore: now + 3600,
-            criticalOptions: [],
-            extensions: [("permit-pty", Data())],
-            reserved: Data(),
-            signatureKey: Data(),
-            signature: Data(),
-            publicKey: Data()
-        )
-    }
 }

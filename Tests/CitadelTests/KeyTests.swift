@@ -569,9 +569,10 @@ final class KeyTests: XCTestCase {
     
     func testRSACertificateKeyTypes() throws {
         // Test that certificate key type prefixes are correctly defined
-        XCTAssertEqual(Insecure.RSA.CertificatePublicKey.publicKeyPrefix(for: .sha1Cert), "ssh-rsa-cert-v01@openssh.com")
-        XCTAssertEqual(Insecure.RSA.CertificatePublicKey.publicKeyPrefix(for: .sha256Cert), "rsa-sha2-256-cert-v01@openssh.com")
-        XCTAssertEqual(Insecure.RSA.CertificatePublicKey.publicKeyPrefix(for: .sha512Cert), "rsa-sha2-512-cert-v01@openssh.com")
+        // Test that certificate algorithm variants are correctly defined
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha1Cert.rawValue, "ssh-rsa-cert-v01@openssh.com")
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha256Cert.rawValue, "rsa-sha2-256-cert-v01@openssh.com")
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha512Cert.rawValue, "rsa-sha2-512-cert-v01@openssh.com")
         
         // Test certificate algorithm enum
         let sha1Cert = Insecure.RSA.SignatureHashAlgorithm.sha1Cert

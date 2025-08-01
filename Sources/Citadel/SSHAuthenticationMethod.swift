@@ -3,6 +3,11 @@ import NIOSSH
 import Crypto
 import _CryptoExtras
 
+/// Errors that can occur during SSH authentication
+public enum SSHAuthenticationError: Error {
+    case certificateValidationFailed(Error)
+}
+
 /// Represents an authentication method.
 public final class SSHAuthenticationMethod: NIOSSHClientUserAuthenticationDelegate {
     private enum Implementation {
@@ -76,136 +81,9 @@ public final class SSHAuthenticationMethod: NIOSSHClientUserAuthenticationDelega
         return SSHAuthenticationMethod(username: username, offer: .privateKey(.init(privateKey: .init(p521Key: privateKey))))
     }
     
-    /// Creates a certificate-based authentication method for Ed25519.
-    /// - Parameters:
-    ///   - username: The username to authenticate with.
-    ///   - privateKey: The private key to authenticate with.
-    ///   - certificate: The certificate public key to use for authentication.
-    public static func ed25519Certificate(username: String, privateKey: Curve25519.Signing.PrivateKey, certificate: Ed25519.CertificatePublicKey) -> SSHAuthenticationMethod {
-        if let nioSSHCertificate = CertificateConverter.convertToNIOSSHCertifiedPublicKey(certificate) {
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(ed25519Key: privateKey), certifiedKey: nioSSHCertificate))
-            )
-        } else {
-            // Fall back to regular private key authentication if certificate conversion fails
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(ed25519Key: privateKey)))
-            )
-        }
-    }
-
-    // TODO: Remember to remove
-    // Only reference in development
-    public static func ed25519CertificateNative(username: String, privateKey: Curve25519.Signing.PrivateKey, certificate: NIOSSHCertifiedPublicKey) -> SSHAuthenticationMethod {
-        return SSHAuthenticationMethod(
-            username: username,
-            offer: .privateKey(.init(privateKey: .init(ed25519Key: privateKey), certifiedKey: certificate))
-        )
-    }
-
-    public static func p256CertificateNative(username: String, privateKey: P256.Signing.PrivateKey, certificate: NIOSSHCertifiedPublicKey) -> SSHAuthenticationMethod {
-        return SSHAuthenticationMethod(
-            username: username,
-            offer: .privateKey(.init(privateKey: .init(p256Key: privateKey), certifiedKey: certificate))
-        )
-    }
-    
-    /// Creates a certificate-based authentication method for RSA.
-    /// - Parameters:
-    ///   - username: The username to authenticate with.
-    ///   - privateKey: The private key to authenticate with.
-    ///   - certificate: The certificate public key to use for authentication.
-    public static func rsaCertificate(username: String, privateKey: Insecure.RSA.PrivateKey, certificate: Insecure.RSA.CertificatePublicKey) -> SSHAuthenticationMethod {
-        if let nioSSHCertificate = CertificateConverter.convertToNIOSSHCertifiedPublicKey(certificate) {
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(custom: privateKey), certifiedKey: nioSSHCertificate))
-            )
-        } else {
-            // Fall back to regular private key authentication if certificate conversion fails
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(custom: privateKey)))
-            )
-        }
-    }
-    
-    /// Creates a certificate-based authentication method for P256.
-    /// - Parameters:
-    ///   - username: The username to authenticate with.
-    ///   - privateKey: The private key to authenticate with.
-    ///   - certificate: The certificate public key to use for authentication.
-    public static func p256Certificate(username: String, privateKey: P256.Signing.PrivateKey, certificate: P256.Signing.CertificatePublicKey) -> SSHAuthenticationMethod {
-        if let nioSSHCertificate = CertificateConverter.convertToNIOSSHCertifiedPublicKey(certificate) {
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(p256Key: privateKey), certifiedKey: nioSSHCertificate))
-            )
-        } else {
-            // Fall back to regular private key authentication if certificate conversion fails
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(p256Key: privateKey)))
-            )
-        }
-    }
-
-    /// Creates a certificate-based authentication method for P384.
-    /// - Parameters:
-    ///   - username: The username to authenticate with.
-    ///   - privateKey: The private key to authenticate with.
-    ///   - certificate: The certificate public key to use for authentication.
-    public static func p384Certificate(username: String, privateKey: P384.Signing.PrivateKey, certificate: P384.Signing.CertificatePublicKey) -> SSHAuthenticationMethod {
-        if let nioSSHCertificate = CertificateConverter.convertToNIOSSHCertifiedPublicKey(certificate) {
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(p384Key: privateKey), certifiedKey: nioSSHCertificate))
-            )
-        } else {
-            // Fall back to regular private key authentication if certificate conversion fails
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(p384Key: privateKey)))
-            )
-        }
-    }
-    
-    /// Creates a certificate-based authentication method for P521.
-    /// - Parameters:
-    ///   - username: The username to authenticate with.
-    ///   - privateKey: The private key to authenticate with.
-    ///   - certificate: The certificate public key to use for authentication.
-    public static func p521Certificate(username: String, privateKey: P521.Signing.PrivateKey, certificate: P521.Signing.CertificatePublicKey) -> SSHAuthenticationMethod {
-        if let nioSSHCertificate = CertificateConverter.convertToNIOSSHCertifiedPublicKey(certificate) {
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(p521Key: privateKey), certifiedKey: nioSSHCertificate))
-            )
-        } else {
-            // Fall back to regular private key authentication if certificate conversion fails
-            return SSHAuthenticationMethod(
-                username: username,
-                offer: .privateKey(.init(privateKey: .init(p521Key: privateKey)))
-            )
-        }
-    }
     
     public static func custom(_ auth: NIOSSHClientUserAuthenticationDelegate) -> SSHAuthenticationMethod {
         return SSHAuthenticationMethod(custom: auth)
-    }
-    
-    /// Creates a certificate-based authentication method using NIOSSH types directly.
-    /// - Parameters:
-    ///   - username: The username to authenticate with.
-    ///   - privateKey: The NIOSSH private key to authenticate with.
-    ///   - certificate: The NIOSSH certified public key to use for authentication.
-    public static func certificate(username: String, privateKey: NIOSSHPrivateKey, certificate: NIOSSHCertifiedPublicKey) -> SSHAuthenticationMethod {
-        return SSHAuthenticationMethod(
-            username: username,
-            offer: .privateKey(.init(privateKey: privateKey, certifiedKey: certificate))
-        )
     }
     
     
