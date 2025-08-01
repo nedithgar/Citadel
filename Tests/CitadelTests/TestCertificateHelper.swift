@@ -49,8 +49,7 @@ final class TestCertificateHelper {
     }
     
     /// Parse an Ed25519 certificate
-    static func parseEd25519Certificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: Curve25519.Signing.PrivateKey, certificate: Ed25519.CertificatePublicKey) {
-        let certData = try loadCertificate(filename: certificateFile)
+    static func parseEd25519Certificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: Curve25519.Signing.PrivateKey, certificate: NIOSSHCertifiedPublicKey) {
         let keyData = try loadPrivateKey(filename: privateKeyFile)
         
         // Parse the OpenSSH private key
@@ -58,15 +57,14 @@ final class TestCertificateHelper {
         let opensshKey = try OpenSSH.PrivateKey<Curve25519.Signing.PrivateKey>(string: keyString)
         let privateKey = opensshKey.privateKey
         
-        // Parse the certificate
-        let cert = try Ed25519.CertificatePublicKey(certificateData: certData)
+        // Parse the certificate using NIOSSHCertificateLoader
+        let cert = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(certificatesPath)/\(certificateFile)")
         
         return (privateKey, cert)
     }
     
     /// Parse a P256 ECDSA certificate
-    static func parseP256Certificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: P256.Signing.PrivateKey, certificate: P256.Signing.CertificatePublicKey) {
-        let certData = try loadCertificate(filename: certificateFile)
+    static func parseP256Certificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: P256.Signing.PrivateKey, certificate: NIOSSHCertifiedPublicKey) {
         let keyData = try loadPrivateKey(filename: privateKeyFile)
         
         // Parse the OpenSSH private key
@@ -74,15 +72,14 @@ final class TestCertificateHelper {
         let opensshKey = try OpenSSH.PrivateKey<P256.Signing.PrivateKey>(string: keyString)
         let privateKey = opensshKey.privateKey
         
-        // Parse the certificate
-        let cert = try P256.Signing.CertificatePublicKey(certificateData: certData)
+        // Parse the certificate using NIOSSHCertificateLoader
+        let cert = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(certificatesPath)/\(certificateFile)")
         
         return (privateKey, cert)
     }
     
     /// Parse a P384 ECDSA certificate
-    static func parseP384Certificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: P384.Signing.PrivateKey, certificate: P384.Signing.CertificatePublicKey) {
-        let certData = try loadCertificate(filename: certificateFile)
+    static func parseP384Certificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: P384.Signing.PrivateKey, certificate: NIOSSHCertifiedPublicKey) {
         let keyData = try loadPrivateKey(filename: privateKeyFile)
         
         // Parse the OpenSSH private key
@@ -90,15 +87,14 @@ final class TestCertificateHelper {
         let opensshKey = try OpenSSH.PrivateKey<P384.Signing.PrivateKey>(string: keyString)
         let privateKey = opensshKey.privateKey
         
-        // Parse the certificate
-        let cert = try P384.Signing.CertificatePublicKey(certificateData: certData)
+        // Parse the certificate using NIOSSHCertificateLoader
+        let cert = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(certificatesPath)/\(certificateFile)")
         
         return (privateKey, cert)
     }
     
     /// Parse a P521 ECDSA certificate
-    static func parseP521Certificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: P521.Signing.PrivateKey, certificate: P521.Signing.CertificatePublicKey) {
-        let certData = try loadCertificate(filename: certificateFile)
+    static func parseP521Certificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: P521.Signing.PrivateKey, certificate: NIOSSHCertifiedPublicKey) {
         let keyData = try loadPrivateKey(filename: privateKeyFile)
         
         // Parse the OpenSSH private key
@@ -106,15 +102,14 @@ final class TestCertificateHelper {
         let opensshKey = try OpenSSH.PrivateKey<P521.Signing.PrivateKey>(string: keyString)
         let privateKey = opensshKey.privateKey
         
-        // Parse the certificate
-        let cert = try P521.Signing.CertificatePublicKey(certificateData: certData)
+        // Parse the certificate using NIOSSHCertificateLoader
+        let cert = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(certificatesPath)/\(certificateFile)")
         
         return (privateKey, cert)
     }
     
     /// Parse an RSA certificate
-    static func parseRSACertificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: Insecure.RSA.PrivateKey, certificate: Insecure.RSA.CertificatePublicKey) {
-        let certData = try loadCertificate(filename: certificateFile)
+    static func parseRSACertificate(certificateFile: String, privateKeyFile: String) throws -> (privateKey: Insecure.RSA.PrivateKey, certificate: NIOSSHCertifiedPublicKey) {
         let keyData = try loadPrivateKey(filename: privateKeyFile)
         
         // Parse the OpenSSH private key
@@ -122,8 +117,8 @@ final class TestCertificateHelper {
         let opensshKey = try OpenSSH.PrivateKey<Insecure.RSA.PrivateKey>(string: keyString)
         let privateKey = opensshKey.privateKey
         
-        // Parse the certificate - use sha1Cert for standard ssh-rsa-cert-v01@openssh.com
-        let cert = try Insecure.RSA.CertificatePublicKey(certificateData: certData, algorithm: .sha1Cert)
+        // Parse the certificate using NIOSSHCertificateLoader
+        let cert = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(certificatesPath)/\(certificateFile)")
         
         return (privateKey, cert)
     }

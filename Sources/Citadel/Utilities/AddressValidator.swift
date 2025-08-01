@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import NIOCore
+import NIOSSH
 
 /// Enhanced address validation matching OpenSSH's addr_match_list() behavior
 public struct AddressValidator {
@@ -344,26 +345,20 @@ public struct AddressValidator {
     }
 }
 
-// MARK: - Integration with SSHCertificate
+// MARK: - Integration with NIOSSHCertifiedPublicKey
 
-extension SSHCertificate {
+extension NIOSSHCertifiedPublicKey {
     /// Enhanced source address validation using OpenSSH-compatible matching
     public func validateSourceAddressEnhanced(_ clientAddress: String) throws {
-        // Parse source addresses directly from critical options without creating CertificateConstraints
-        // to avoid circular dependency issues
-        var sourceAddresses: [String]?
-        
-        for (key, value) in self.criticalOptions {
-            if key == "source-address" {
-                var buffer = ByteBuffer(data: value)
-                if let addressString = buffer.readSSHString() {
-                    sourceAddresses = addressString.components(separatedBy: ",")
-                }
-                break
-            }
+        // Parse source addresses directly from critical options
+        guard let sourceAddressString = self.criticalOptions["source-address"] else {
+            return // No source address restriction
         }
         
-        guard let allowedAddresses = sourceAddresses, !allowedAddresses.isEmpty else {
+        // Parse the allowed addresses
+        let allowedAddresses = sourceAddressString.components(separatedBy: ",")
+        
+        guard !allowedAddresses.isEmpty else {
             return // No source address restriction
         }
         
@@ -380,16 +375,13 @@ extension SSHCertificate {
             return
         case 0:
             // No match - not in allowed list
-            throw SSHCertificateError.sourceAddressNotAllowed(
-                clientAddress: clientAddress,
-                allowedAddresses: allowedAddresses
-            )
+            throw SSHCertificateError.sourceAddressNotAllowed(clientAddress)
         case -1:
             // Invalid CIDR list format
-            throw SSHCertificateError.invalidCriticalOption
+            throw SSHCertificateError.parsingFailed("Invalid CIDR format in critical option")
         default:
             // Should not happen
-            throw SSHCertificateError.invalidCriticalOption
+            throw SSHCertificateError.parsingFailed("Unexpected validation result")
         }
     }
 }

@@ -50,8 +50,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
         let opensshKey = try OpenSSH.PrivateKey<Curve25519.Signing.PrivateKey>(string: keyString)
         let privateKey = opensshKey.privateKey
         
-        let certData = try TestCertificateHelper.loadCertificate(filename: "user_limited_principals-cert.pub")
-        let certificate = try Ed25519.CertificatePublicKey(certificateData: certData)
+        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_limited_principals-cert.pub")
         
         // Test: Wrong principal without validation should succeed (client-side use)
         XCTAssertNoThrow(
@@ -147,12 +146,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
         let privateKey = opensshKey.privateKey
         
         let certData = try TestCertificateHelper.loadCertificate(filename: "host_ed25519-cert.pub")
-        let cert = try SSHCertificate(from: certData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")
-        
-        let certificate = Ed25519.CertificatePublicKey(
-            certificate: cert,
-            publicKey: privateKey.publicKey
-        )
+        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/host_ed25519-cert.pub")
         
         // Test: Host certificate for user auth should throw error
         XCTAssertThrowsError(
@@ -232,8 +226,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
         let opensshKey = try OpenSSH.PrivateKey<Curve25519.Signing.PrivateKey>(string: keyString)
         let privateKey = opensshKey.privateKey
         
-        let certData = try TestCertificateHelper.loadCertificate(filename: "user_critical_options-cert.pub")
-        let certificate = try Ed25519.CertificatePublicKey(certificateData: certData)
+        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_critical_options-cert.pub")
         
         // The certificate has force-command and source-address restrictions
         // But our validation currently only checks username, time, and cert type
@@ -247,9 +240,8 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
         )
         
         // Verify the certificate has the expected critical options
-        let constraints = try CertificateConstraints(from: certificate.certificate)
-        XCTAssertEqual(constraints.forceCommand, "/bin/date")
-        XCTAssertEqual(constraints.sourceAddresses, ["192.168.1.0/24", "10.0.0.1"])
+        XCTAssertEqual(certificate.criticalOptions["force-command"], "/bin/date")
+        XCTAssertEqual(certificate.criticalOptions["source-address"], "192.168.1.0/24,10.0.0.1")
     }
     
     // MARK: - Extensions Tests
@@ -260,8 +252,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
         let opensshKey = try OpenSSH.PrivateKey<Curve25519.Signing.PrivateKey>(string: keyString)
         let privateKey = opensshKey.privateKey
         
-        let certData = try TestCertificateHelper.loadCertificate(filename: "user_all_extensions-cert.pub")
-        let certificate = try Ed25519.CertificatePublicKey(certificateData: certData)
+        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_all_extensions-cert.pub")
         
         // Test authentication succeeds
         XCTAssertNoThrow(
@@ -273,11 +264,10 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
         )
         
         // Verify all extensions are present
-        let extensionNames = certificate.certificate.extensions.map { $0.0 }
-        XCTAssertTrue(extensionNames.contains("permit-X11-forwarding"))
-        XCTAssertTrue(extensionNames.contains("permit-agent-forwarding"))
-        XCTAssertTrue(extensionNames.contains("permit-port-forwarding"))
-        XCTAssertTrue(extensionNames.contains("permit-pty"))
-        XCTAssertTrue(extensionNames.contains("permit-user-rc"))
+        XCTAssertNotNil(certificate.extensions["permit-X11-forwarding"])
+        XCTAssertNotNil(certificate.extensions["permit-agent-forwarding"])
+        XCTAssertNotNil(certificate.extensions["permit-port-forwarding"])
+        XCTAssertNotNil(certificate.extensions["permit-pty"])
+        XCTAssertNotNil(certificate.extensions["permit-user-rc"])
     }
 }

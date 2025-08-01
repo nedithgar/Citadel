@@ -6,6 +6,25 @@ import CCryptoBoringSSL
 import Foundation
 import Crypto
 
+/// Errors that can occur during RSA operations
+public enum RSAError: LocalizedError {
+    case messageRepresentativeOutOfRange
+    case message(String)
+    
+    public init(message: String) {
+        self = .message(message)
+    }
+    
+    public var errorDescription: String? {
+        switch self {
+        case .messageRepresentativeOutOfRange:
+            return "Message representative out of range"
+        case .message(let msg):
+            return msg
+        }
+    }
+}
+
 extension Insecure {
     public enum RSA {
         /// Supported RSA signature hash algorithms
@@ -491,212 +510,6 @@ extension Insecure.RSA {
             CCryptoBoringSSL_BN_bn2bin(secret, &array)
             return Data(array)
         }
-    }
-    
-    // MARK: - RSA Certificate Public Key Types
-    
-    /// RSA certificate public key that wraps a regular RSA public key with certificate metadata
-    public final class CertificatePublicKey: NIOSSHPublicKeyProtocol {
-        /// SSH certificate type identifier - this is overridden based on the algorithm
-        public static let publicKeyPrefix = "ssh-rsa-cert-v01@openssh.com" // Default for protocol conformance
-        /// The underlying RSA public key
-        public let publicKey: PublicKey
-        
-        /// The SSH certificate
-        public let certificate: SSHCertificate
-        
-        /// The signature algorithm for this certificate
-        public let signatureAlgorithm: SignatureHashAlgorithm
-        
-        /// The original certificate data (for serialization)
-        private let originalCertificateData: Data
-        
-        /// SSH certificate type identifier based on signature algorithm
-        public static func publicKeyPrefix(for algorithm: SignatureHashAlgorithm) -> String {
-            switch algorithm {
-            case .sha1Cert:
-                return "ssh-rsa-cert-v01@openssh.com"
-            case .sha256Cert:
-                return "rsa-sha2-256-cert-v01@openssh.com"
-            case .sha512Cert:
-                return "rsa-sha2-512-cert-v01@openssh.com"
-            default:
-                fatalError("Invalid certificate algorithm")
-            }
-        }
-        
-        /// The raw representation of the public key (not the certificate)
-        public var rawRepresentation: Data {
-            publicKey.rawRepresentation
-        }
-        
-        /// Initialize from certificate data with a specific algorithm
-        public init(certificateData: Data, algorithm: SignatureHashAlgorithm) throws {
-            guard algorithm.isCertificate else {
-                throw RSAError(message: "Algorithm must be a certificate type")
-            }
-            
-            self.originalCertificateData = certificateData
-            self.signatureAlgorithm = algorithm
-            let expectedPrefix = Self.publicKeyPrefix(for: algorithm)
-            self.certificate = try SSHCertificate(from: certificateData, expectedKeyType: expectedPrefix)
-            
-            // Extract the RSA public key from the certificate
-            guard let publicKeyData = certificate.publicKey else {
-                throw SSHCertificateError.missingPublicKey
-            }
-            
-            var buffer = ByteBuffer(data: publicKeyData)
-            self.publicKey = try PublicKey.read(from: &buffer)
-        }
-        
-        /// Initialize with existing certificate and public key
-        public init(certificate: SSHCertificate, publicKey: PublicKey, algorithm: SignatureHashAlgorithm) {
-            self.certificate = certificate
-            self.publicKey = publicKey
-            self.signatureAlgorithm = algorithm
-            // When initialized this way, we need to serialize the certificate
-            self.originalCertificateData = Data()
-        }
-        
-        // MARK: - NIOSSHPublicKeyProtocol conformance
-        
-        public static func read(from buffer: inout ByteBuffer) throws -> CertificatePublicKey {
-            // Save the entire certificate blob
-            let startIndex = buffer.readerIndex
-            
-            // Read the key type string to determine the algorithm
-            guard let keyType = buffer.readSSHString() else {
-                throw SSHCertificateError.invalidCertificateType
-            }
-            
-            // Determine the algorithm from the key type
-            let algorithm: SignatureHashAlgorithm
-            switch keyType {
-            case "ssh-rsa-cert-v01@openssh.com":
-                algorithm = .sha1Cert
-            case "rsa-sha2-256-cert-v01@openssh.com":
-                algorithm = .sha256Cert
-            case "rsa-sha2-512-cert-v01@openssh.com":
-                algorithm = .sha512Cert
-            default:
-                throw SSHCertificateError.invalidCertificateType
-            }
-            
-            // Reset buffer and read the full certificate
-            buffer.moveReaderIndex(to: startIndex)
-            let certLength = buffer.readableBytes
-            guard let certData = buffer.readData(length: certLength) else {
-                throw SSHCertificateError.invalidCertificateType
-            }
-            
-            return try CertificatePublicKey(certificateData: certData, algorithm: algorithm)
-        }
-        
-        public func write(to buffer: inout ByteBuffer) -> Int {
-            // If we have the original certificate data, use it directly
-            if !originalCertificateData.isEmpty {
-                return buffer.writeData(originalCertificateData)
-            }
-            
-            // Otherwise, serialize the certificate from its components
-            var certBuffer = ByteBufferAllocator().buffer(capacity: 1024)
-            
-            // Write key type
-            certBuffer.writeSSHString(Self.publicKeyPrefix(for: signatureAlgorithm))
-            
-            // Write nonce
-            certBuffer.writeSSHData(certificate.nonce)
-            
-            // Write public key
-            var publicKeyBuffer = ByteBufferAllocator().buffer(capacity: 256)
-            // Cast to NIOSSHPublicKeyProtocol to avoid ambiguity
-            let nioSSHKey = publicKey as NIOSSHPublicKeyProtocol
-            _ = nioSSHKey.write(to: &publicKeyBuffer)
-            certBuffer.writeSSHData(Data(publicKeyBuffer.readableBytesView))
-            
-            // Write serial
-            certBuffer.writeInteger(certificate.serial)
-            
-            // Write type
-            certBuffer.writeInteger(certificate.type.rawValue)
-            
-            // Write key ID
-            certBuffer.writeSSHString(certificate.keyId)
-            
-            // Write valid principals
-            var principalsBuffer = ByteBufferAllocator().buffer(capacity: 512)
-            for principal in certificate.validPrincipals {
-                principalsBuffer.writeSSHString(principal)
-            }
-            certBuffer.writeSSHString(Data(principalsBuffer.readableBytesView))
-            
-            // Write validity period
-            certBuffer.writeInteger(certificate.validAfter)
-            certBuffer.writeInteger(certificate.validBefore)
-            
-            // Write critical options
-            var criticalOptionsBuffer = ByteBufferAllocator().buffer(capacity: 512)
-            for (name, value) in certificate.criticalOptions {
-                criticalOptionsBuffer.writeSSHString(name)
-                criticalOptionsBuffer.writeSSHData(value)
-            }
-            certBuffer.writeSSHString(Data(criticalOptionsBuffer.readableBytesView))
-            
-            // Write extensions
-            var extensionsBuffer = ByteBufferAllocator().buffer(capacity: 512)
-            for (name, value) in certificate.extensions {
-                extensionsBuffer.writeSSHString(name)
-                extensionsBuffer.writeSSHData(value)
-            }
-            certBuffer.writeSSHString(Data(extensionsBuffer.readableBytesView))
-            
-            // Write reserved
-            certBuffer.writeSSHData(certificate.reserved)
-            
-            // Write signature key
-            certBuffer.writeSSHData(certificate.signatureKey)
-            
-            // Write signature
-            certBuffer.writeSSHData(certificate.signature)
-            
-            // Write the complete certificate to the output buffer
-            return buffer.writeBuffer(&certBuffer)
-        }
-        
-        public func isValidSignature<D>(_ signature: NIOSSHSignatureProtocol, for data: D) -> Bool where D : DataProtocol {
-            // Delegate to the underlying public key
-            publicKey.isValidSignature(signature, for: data)
-        }
-    }
-}
-
-public struct RSAError: Error {
-    let message: String
-    
-    static let messageRepresentativeOutOfRange = RSAError(message: "message representative out of range")
-    static let ciphertextRepresentativeOutOfRange = RSAError(message: "ciphertext representative out of range")
-    static let signatureRepresentativeOutOfRange = RSAError(message: "signature representative out of range")
-    static let invalidPem = RSAError(message: "invalid PEM")
-    static let pkcs1Error = RSAError(message: "PKCS1Error")
-}
-
-extension BigUInt {
-    public static func randomPrime(bits: Int) -> BigUInt {
-        while true {
-            var privateExponent = BigUInt.randomInteger(withExactWidth: bits)
-            privateExponent |= 1
-            
-            if privateExponent.isPrime() {
-                return privateExponent
-            }
-        }
-    }
-    
-    fileprivate init(boringSSL bignum: UnsafeMutablePointer<BIGNUM>) {
-        var data = [UInt8](repeating: 0, count: Int(CCryptoBoringSSL_BN_num_bytes(bignum)))
-        CCryptoBoringSSL_BN_bn2bin(bignum, &data)
-        self.init(Data(data))
     }
 }
 
