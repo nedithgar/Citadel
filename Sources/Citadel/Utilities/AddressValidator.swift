@@ -1,5 +1,4 @@
 import Foundation
-import Network
 import NIOCore
 import NIOSSH
 
@@ -200,6 +199,14 @@ public struct AddressValidator {
         return 0
     }
     
+    // MARK: - Constants
+    
+    /// Maximum length of IPv6 address string representation (per POSIX INET6_ADDRSTRLEN)
+    private static let INET6_ADDRSTRLEN = 46
+    
+    /// Maximum length of CIDR prefix notation (e.g., "/128")
+    private static let MAX_CIDR_PREFIX_LENGTH = 4  // "/" + up to 3 digits
+    
     /// Validate a CIDR list has valid format (strict mode)
     /// Matches OpenSSH's validation in addr_match_cidr_list()
     public static func validateCIDRList(_ cidrList: String) -> Bool {
@@ -235,8 +242,8 @@ public struct AddressValidator {
                 }
             }
             
-            // Check length limits (INET6_ADDRSTRLEN + 3)
-            if pattern.count > 46 + 3 { // IPv6 max length + "/128"
+            // Check length limits
+            if pattern.count > INET6_ADDRSTRLEN + MAX_CIDR_PREFIX_LENGTH {
                 return false
             }
         }
@@ -247,59 +254,10 @@ public struct AddressValidator {
     // MARK: - Private Helpers
     
     private static func matchCIDR(address: String, cidr: String) -> Bool {
-        // For IPv6, use Network framework
-        if address.contains(":") || cidr.contains(":") {
-            return matchIPv6CIDR(address: address, cidr: cidr)
-        }
-        
-        // For IPv4, use our existing CIDRMatcher
+        // Use our cross-platform CIDRMatcher for both IPv4 and IPv6
         return CIDRMatcher.matches(address: address, cidr: cidr)
     }
     
-    private static func matchIPv6CIDR(address: String, cidr: String) -> Bool {
-        // Parse CIDR
-        let parts = cidr.split(separator: "/")
-        guard parts.count == 2,
-              let prefixLength = Int(parts[1]),
-              prefixLength >= 0 && prefixLength <= 128 else {
-            return false
-        }
-        
-        let networkAddress = String(parts[0])
-        
-        // Use Network framework for IPv6
-        guard let addrIPv6 = IPv6Address(address),
-              let netIPv6 = IPv6Address(networkAddress) else {
-            return false
-        }
-        
-        // Compare with prefix length
-        return matchIPv6WithPrefix(address: addrIPv6, network: netIPv6, prefixLength: prefixLength)
-    }
-    
-    private static func matchIPv6WithPrefix(address: IPv6Address, network: IPv6Address, prefixLength: Int) -> Bool {
-        let addrBytes = address.rawValue
-        let netBytes = network.rawValue
-        
-        // Compare full bytes
-        let fullBytes = prefixLength / 8
-        for i in 0..<fullBytes {
-            if addrBytes[i] != netBytes[i] {
-                return false
-            }
-        }
-        
-        // Compare remaining bits
-        let remainingBits = prefixLength % 8
-        if remainingBits > 0 && fullBytes < 16 {
-            let mask = UInt8(0xFF << (8 - remainingBits))
-            if (addrBytes[fullBytes] & mask) != (netBytes[fullBytes] & mask) {
-                return false
-            }
-        }
-        
-        return true
-    }
     
     private static func matchWildcard(address: String, pattern: String) -> Bool {
         // Use the new OpenSSH-compatible pattern matcher
@@ -332,12 +290,12 @@ public struct AddressValidator {
     
     private static func isValidIPAddress(_ address: String) -> Bool {
         // Try IPv4
-        if IPv4Address(address) != nil {
+        if CIDRMatcher.isValidIPv4(address) {
             return true
         }
         
         // Try IPv6
-        if IPv6Address(address) != nil {
+        if CIDRMatcher.isValidIPv6(address) {
             return true
         }
         
