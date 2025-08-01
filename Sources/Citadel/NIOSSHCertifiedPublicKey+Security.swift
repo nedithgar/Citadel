@@ -76,7 +76,7 @@ extension NIOSSHCertifiedPublicKey {
             throw SSHCertificateError.notYetValid(validAfter: Date(timeIntervalSince1970: TimeInterval(validAfter)))
         }
         
-        if validBefore > 0 && validBefore != 0xFFFFFFFFFFFFFFFF && currentTimestamp > validBefore {
+        if validBefore > 0 && validBefore != UInt64.max && currentTimestamp > validBefore {
             throw SSHCertificateError.expired(validBefore: Date(timeIntervalSince1970: TimeInterval(validBefore)))
         }
     }

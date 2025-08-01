@@ -152,9 +152,6 @@ enum SSHCertificateGenerator {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
         process.arguments = arguments
         
-        // Debug: print the command
-        // print("ssh-keygen " + arguments.joined(separator: " "))
-        
         let errorPipe = Pipe()
         process.standardError = errorPipe
         

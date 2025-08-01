@@ -1,4 +1,13 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(CRT)
+import CRT
+#endif
 
 /// Protocol for platform-specific group membership checking
 public protocol GroupMembershipChecker {
@@ -265,13 +274,62 @@ public struct PatternMatcher {
     }
     
     /// Helper to check if a string is an IP address
+    /// Uses getaddrinfo() with AI_NUMERICHOST for robust validation (OpenSSH approach)
     private static func isIPAddress(_ string: String) -> Bool {
-        // Simple check for IPv4 or IPv6
-        let ipv4Pattern = #"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"#
-        let ipv6Pattern = #"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$"#
+        // Use getaddrinfo with AI_NUMERICHOST to validate IP addresses
+        // This is the same approach OpenSSH uses in addr_pton()
+        var hints = addrinfo()
+        hints.ai_flags = AI_NUMERICHOST
+        hints.ai_family = AF_UNSPEC  // Accept both IPv4 and IPv6
         
-        return string.range(of: ipv4Pattern, options: .regularExpression) != nil ||
-               string.range(of: ipv6Pattern, options: .regularExpression) != nil
+        var result: UnsafeMutablePointer<addrinfo>?
+        let status = getaddrinfo(string, nil, &hints, &result)
+        
+        if let result = result {
+            freeaddrinfo(result)
+        }
+        
+        return status == 0
+    }
+    
+    /// Validates if a string is a valid IPv4 address
+    /// Uses getaddrinfo() for robust validation matching OpenSSH
+    public static func isValidIPv4(_ address: String) -> Bool {
+        var hints = addrinfo()
+        hints.ai_flags = AI_NUMERICHOST
+        hints.ai_family = AF_INET  // IPv4 only
+        
+        var result: UnsafeMutablePointer<addrinfo>?
+        let status = getaddrinfo(address, nil, &hints, &result)
+        
+        if let result = result {
+            freeaddrinfo(result)
+        }
+        
+        return status == 0
+    }
+    
+    /// Validates if a string is a valid IPv6 address
+    /// Uses getaddrinfo() for robust validation matching OpenSSH
+    public static func isValidIPv6(_ address: String) -> Bool {
+        var hints = addrinfo()
+        hints.ai_flags = AI_NUMERICHOST
+        hints.ai_family = AF_INET6  // IPv6 only
+        
+        var result: UnsafeMutablePointer<addrinfo>?
+        let status = getaddrinfo(address, nil, &hints, &result)
+        
+        if let result = result {
+            freeaddrinfo(result)
+        }
+        
+        return status == 0
+    }
+    
+    /// Validates if a string is a valid IP address (IPv4 or IPv6)
+    /// Uses getaddrinfo() for robust validation matching OpenSSH
+    public static func isValidIPAddress(_ address: String) -> Bool {
+        return isIPAddress(address)
     }
     
     /// CIDR pattern matching for IP addresses
@@ -416,33 +474,48 @@ public struct PatternMatcher {
     /// Valid characters for CIDR notation (matching OpenSSH)
     private static let validCIDRChars = CharacterSet(charactersIn: "0123456789abcdefABCDEF.:/")
     
-    /// Validates CIDR list format
+    /// Validates CIDR list format with security checks matching OpenSSH
     /// - Parameter cidrList: CIDR list to validate
     /// - Returns: true if all entries are valid CIDR notation
     public static func validateCIDRList(_ cidrList: String) -> Bool {
+        // Security check: limit length (OpenSSH limits to prevent DoS)
+        guard cidrList.count <= 1000 else { return false }
+        
         let entries = cidrList.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         
         for entry in entries {
             // Skip empty entries
             guard !entry.isEmpty else { continue }
             
-            // Check for valid CIDR characters only
-            if !entry.allSatisfy({ validCIDRChars.contains($0.unicodeScalars.first!) }) {
+            // Strip negation prefix if present
+            let actualEntry = entry.hasPrefix("!") ? String(entry.dropFirst()) : entry
+            
+            // Security check: validate character set (matching OpenSSH's addr_match_cidr_list)
+            if !actualEntry.allSatisfy({ validCIDRChars.contains($0.unicodeScalars.first!) }) {
                 return false
             }
             
-            // Basic CIDR format validation
-            if entry.contains("/") {
-                let parts = entry.split(separator: "/")
+            // CIDR format validation
+            if actualEntry.contains("/") {
+                let parts = actualEntry.split(separator: "/")
                 if parts.count != 2 {
                     return false
                 }
+                
+                let addressPart = String(parts[0])
+                
+                // Validate IP address part using proper validation
+                if !isIPAddress(addressPart) {
+                    return false
+                }
+                
                 // Validate prefix length
                 guard let prefixLen = Int(parts[1]) else {
                     return false
                 }
-                // Check prefix length bounds
-                if entry.contains(":") {
+                
+                // Check prefix length bounds based on address type
+                if addressPart.contains(":") {
                     // IPv6
                     if prefixLen < 0 || prefixLen > 128 {
                         return false
@@ -452,6 +525,11 @@ public struct PatternMatcher {
                     if prefixLen < 0 || prefixLen > 32 {
                         return false
                     }
+                }
+            } else {
+                // Non-CIDR entry must be a valid IP address
+                if !isIPAddress(actualEntry) {
+                    return false
                 }
             }
         }
