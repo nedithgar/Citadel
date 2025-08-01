@@ -87,10 +87,4 @@ final class NIOSSHCertificateAuthTests: XCTestCase {
         
         try await group.shutdownGracefully()
     }
-    
-    func testCertificateConverterIntegration() throws {
-        // Skip test - CertificateConverter is being removed in migration to NIOSSH
-        throw XCTSkip("CertificateConverter is deprecated and being removed")
-        
-    }
 }

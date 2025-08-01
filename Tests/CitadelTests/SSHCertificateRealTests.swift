@@ -90,19 +90,6 @@ final class SSHCertificateRealTests: XCTestCase {
         XCTAssertNotNil(certificate)
     }
     
-    func testRSACertificateParsing() throws {
-        // SKIP TEST: RSA certificates are not supported by NIOSSH
-        throw XCTSkip("RSA certificates are not supported by NIOSSH")
-        let (_, certificate) = try TestCertificateHelper.parseRSACertificate(
-            certificateFile: "user_rsa-cert.pub",
-            privateKeyFile: "user_rsa"
-        )
-        
-        XCTAssertEqual(certificate.keyID, "test-user-rsa")
-        XCTAssertEqual(certificate.serial, 5)
-        XCTAssertEqual(certificate.type, .user)
-        XCTAssertEqual(certificate.validPrincipals, ["testuser"])
-    }
     
     // MARK: - Host Certificate Tests
     
@@ -132,15 +119,6 @@ final class SSHCertificateRealTests: XCTestCase {
     
     // MARK: - Time Validation Tests
     
-    func testExpiredCertificate() throws {
-        // Skip test - expired certificate handling requires certificates with known validity periods
-        throw XCTSkip("Expired certificate tests require certificates with specific validity periods")
-    }
-    
-    func testNotYetValidCertificate() throws {
-        // Skip test - future certificate handling requires certificates with known validity periods
-        throw XCTSkip("Future certificate tests require certificates with specific validity periods")
-    }
     
     // MARK: - Critical Options Tests
     
@@ -245,18 +223,4 @@ final class SSHCertificateRealTests: XCTestCase {
     
     // MARK: - Signature Type Tests
     
-    func testSignatureTypeExtraction() throws {
-        // Skip - signature type extraction is internal to NIOSSH
-        throw XCTSkip("Signature type extraction is internal to NIOSSH")
-    }
-    
-    func testSignatureTypeValidation() throws {
-        // Skip - signature algorithm validation is handled internally by NIOSSH
-        throw XCTSkip("Signature algorithm validation is handled internally by NIOSSH")
-    }
-    
-    func testSignatureTypeInValidateForAuthentication() throws {
-        // Skip - signature algorithm validation is handled internally by NIOSSH
-        throw XCTSkip("Signature algorithm validation is handled internally by NIOSSH")
-    }
 }
