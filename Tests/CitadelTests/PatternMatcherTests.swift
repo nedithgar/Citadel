@@ -318,7 +318,7 @@ final class PatternMatcherTests: XCTestCase {
         // Invalid formats (no wildcards allowed)
         XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.*.*"), -1)
         XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "!192.168.1.0/24"), -1) // No negation
-        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.100"), -1) // Must have /
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.100"), 1) // Plain IP allowed (OpenSSH behavior)
         
         // IPv6 CIDR matching
         XCTAssertEqual(AddressValidator.matchCIDRList("2001:db8::1", against: "2001:db8::/32"), 1)
@@ -342,8 +342,8 @@ final class PatternMatcherTests: XCTestCase {
         // Invalid - contains negation
         XCTAssertFalse(AddressValidator.validateCIDRList("!192.168.1.0/24"))
         
-        // Invalid - no CIDR notation
-        XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.100"))
+        // Valid - plain IP allowed (OpenSSH behavior)
+        XCTAssertTrue(AddressValidator.validateCIDRList("192.168.1.100"))
         
         // Invalid - bad characters
         XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.0/24;DROP TABLE"))

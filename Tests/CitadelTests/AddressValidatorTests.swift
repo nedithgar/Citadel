@@ -201,7 +201,7 @@ final class AddressValidatorTests: XCTestCase {
         // Invalid formats return -1
         XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.*"), -1) // Wildcards not allowed
         XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "!192.168.1.0/24"), -1) // Negation not allowed
-        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.100"), -1) // Must be CIDR notation
+        XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.100"), 1) // Plain IP allowed (OpenSSH behavior)
         XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "192.168.1.0/33"), -1) // Invalid prefix
         XCTAssertEqual(AddressValidator.matchCIDRList("192.168.1.100", against: "invalid.address/24"), -1) // Invalid address
     }
@@ -216,7 +216,7 @@ final class AddressValidatorTests: XCTestCase {
         
         // Invalid CIDR lists
         XCTAssertFalse(AddressValidator.validateCIDRList("")) // Empty
-        XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.100")) // Not CIDR notation
+        XCTAssertTrue(AddressValidator.validateCIDRList("192.168.1.100")) // Plain IP allowed (OpenSSH behavior)
         XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.*")) // Wildcards not allowed
         XCTAssertFalse(AddressValidator.validateCIDRList("!192.168.1.0/24")) // Negation not allowed
         XCTAssertFalse(AddressValidator.validateCIDRList("192.168.1.0/33")) // Invalid prefix

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import NIOCore
 
 /// Enhanced address validation matching OpenSSH's addr_match_list() behavior
 public struct AddressValidator {
@@ -88,12 +89,20 @@ public struct AddressValidator {
                 continue
             }
             
-            // Only CIDR patterns are allowed (must contain '/')
-            guard pattern.contains("/") else {
-                return -1 // Invalid format
+            // Handle both CIDR notation and plain IP addresses (OpenSSH behavior)
+            let cidrPattern: String
+            if pattern.contains("/") {
+                cidrPattern = pattern
+            } else {
+                // Plain IP address - add default mask like OpenSSH
+                if pattern.contains(":") {
+                    cidrPattern = "\(pattern)/128"  // IPv6 single host
+                } else {
+                    cidrPattern = "\(pattern)/32"   // IPv4 single host
+                }
             }
             
-            if matchCIDR(address: address, cidr: pattern) {
+            if matchCIDR(address: address, cidr: cidrPattern) {
                 return 1
             }
         }
@@ -169,12 +178,20 @@ public struct AddressValidator {
                 return -1
             }
             
-            // Must contain / for CIDR notation
-            guard pattern.contains("/") else {
-                return -1
+            // Handle both CIDR notation and plain IP addresses (OpenSSH behavior)
+            let cidrPattern: String
+            if pattern.contains("/") {
+                cidrPattern = pattern
+            } else {
+                // Plain IP address - add default mask like OpenSSH
+                if pattern.contains(":") {
+                    cidrPattern = "\(pattern)/128"  // IPv6 single host
+                } else {
+                    cidrPattern = "\(pattern)/32"   // IPv4 single host
+                }
             }
             
-            if matchCIDR(address: address, cidr: pattern) {
+            if matchCIDR(address: address, cidr: cidrPattern) {
                 return 1
             }
         }
@@ -195,16 +212,26 @@ public struct AddressValidator {
         let patterns = cidrList.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         
         for pattern in patterns {
-            guard !pattern.isEmpty else { continue }
+            // OpenSSH returns error for empty entries
+            if pattern.isEmpty {
+                return false
+            }
             
             // No negation allowed in strict mode
             if pattern.hasPrefix("!") {
                 return false
             }
             
-            // Must be valid CIDR
-            if !isValidCIDR(pattern) {
-                return false
+            // Must be valid CIDR or plain IP address (OpenSSH behavior)
+            if pattern.contains("/") {
+                if !isValidCIDR(pattern) {
+                    return false
+                }
+            } else {
+                // Plain IP address is allowed - will be treated as /32 or /128
+                if !isValidIPAddress(pattern) {
+                    return false
+                }
             }
             
             // Check length limits (INET6_ADDRSTRLEN + 3)
@@ -322,9 +349,21 @@ public struct AddressValidator {
 extension SSHCertificate {
     /// Enhanced source address validation using OpenSSH-compatible matching
     public func validateSourceAddressEnhanced(_ clientAddress: String) throws {
-        let constraints = try CertificateConstraints(from: self)
+        // Parse source addresses directly from critical options without creating CertificateConstraints
+        // to avoid circular dependency issues
+        var sourceAddresses: [String]?
         
-        guard let allowedAddresses = constraints.sourceAddresses, !allowedAddresses.isEmpty else {
+        for (key, value) in self.criticalOptions {
+            if key == "source-address" {
+                var buffer = ByteBuffer(data: value)
+                if let addressString = buffer.readSSHString() {
+                    sourceAddresses = addressString.components(separatedBy: ",")
+                }
+                break
+            }
+        }
+        
+        guard let allowedAddresses = sourceAddresses, !allowedAddresses.isEmpty else {
             return // No source address restriction
         }
         

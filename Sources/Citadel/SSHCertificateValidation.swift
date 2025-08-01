@@ -73,6 +73,11 @@ public extension SSHCertificate {
     var permitUserRc: Bool {
         return extensions.contains { $0.0 == "permit-user-rc" }
     }
+    
+    /// Check if no-touch-required extension is present
+    var noTouchRequired: Bool {
+        return extensions.contains { $0.0 == "no-touch-required" }
+    }
 }
 
 /// Extended validation errors

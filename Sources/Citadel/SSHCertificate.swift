@@ -5,9 +5,13 @@ import Crypto
 import _CryptoExtras
 import CCryptoBoringSSL
 import NIOSSH
+import Logging
 
 /// SSH Certificate structure
 public struct SSHCertificate {
+    /// Maximum number of principals allowed in a certificate (OpenSSH: SSHKEY_CERT_MAX_PRINCIPALS)
+    public static let maxPrincipals = 256
+    
     /// Certificate types
     public enum CertificateType: UInt32 {
         case user = 1
@@ -173,6 +177,11 @@ public struct SSHCertificate {
         }
         var principals: [String] = []
         while principalsBuffer.readableBytes > 0 {
+            // Check if we've exceeded the maximum number of principals
+            if principals.count >= Self.maxPrincipals {
+                throw SSHCertificateError.tooManyPrincipals(count: principals.count + 1, maximum: Self.maxPrincipals)
+            }
+            
             guard let principal = principalsBuffer.readSSHString() else {
                 throw SSHCertificateError.invalidPrincipal
             }
@@ -689,12 +698,26 @@ public struct CertificateConstraints {
     public let permitX11Forwarding: Bool
     public let permitUserRC: Bool
     public let verifyRequired: Bool
+    public let noRequireUserPresence: Bool
+    
+    /// Logger for certificate validation
+    private static let logger = Logger(label: "nl.orlandos.citadel.certificate")
     
     /// Known critical options as per OpenSSH
     private static let knownCriticalOptions: Set<String> = [
         "force-command",
         "source-address",
         "verify-required"
+    ]
+    
+    /// Known extensions as per OpenSSH
+    private static let knownExtensions: Set<String> = [
+        "permit-X11-forwarding",
+        "permit-agent-forwarding",
+        "permit-port-forwarding",
+        "permit-pty",
+        "permit-user-rc",
+        "no-touch-required"
     ]
     
     init(from certificate: SSHCertificate) throws {
@@ -725,6 +748,14 @@ public struct CertificateConstraints {
         
         self.verifyRequired = options["verify-required"] != nil
         
+        // Check for unknown extensions and log warnings (OpenSSH behavior)
+        for (extensionName, _) in certificate.extensions {
+            if !Self.knownExtensions.contains(extensionName) {
+                // Log warning for unknown extension, matching OpenSSH's logit() behavior
+                Self.logger.warning("Certificate extension \"\(extensionName)\" is not supported")
+            }
+        }
+        
         // Parse permissions from extensions (OpenSSH behavior)
         // If extension is present, permission is granted
         self.permitPTY = certificate.permitPty
@@ -732,6 +763,7 @@ public struct CertificateConstraints {
         self.permitAgentForwarding = certificate.permitAgentForwarding
         self.permitX11Forwarding = certificate.permitX11Forwarding
         self.permitUserRC = certificate.permitUserRc
+        self.noRequireUserPresence = certificate.noTouchRequired
     }
 }
 
@@ -772,6 +804,7 @@ public enum SSHCertificateError: Error, Equatable {
     case unknownCriticalOption(String)
     case disallowedSignatureAlgorithm(algorithm: String)
     case rsaKeyTooShort(bits: Int, minimumBits: Int)
+    case tooManyPrincipals(count: Int, maximum: Int)
 }
 
 // MARK: - Private extensions for certificate parsing

@@ -378,6 +378,155 @@ final class CertificateValidationTests: XCTestCase {
         }
     }
     
+    // MARK: - Unknown Extension Tests
+    
+    func testUnknownExtensions_LoggedButAccepted() throws {
+        // Create certificate with unknown extensions
+        let certificate = SSHCertificate(
+            nonce: Data(repeating: 0, count: 32),
+            serial: 1,
+            type: .user,
+            keyId: "test@example.com",
+            validPrincipals: ["testuser"],
+            validAfter: 0,
+            validBefore: UInt64.max,
+            criticalOptions: [],
+            extensions: [
+                ("permit-pty", Data()),  // Known extension
+                ("unknown-extension-1", Data()),  // Unknown extension
+                ("permit-X11-forwarding", Data()),  // Known extension
+                ("custom-feature", Data())  // Unknown extension
+            ],
+            reserved: Data(),
+            signatureKey: Data(),
+            signature: Data(),
+            publicKey: Data(repeating: 0, count: 32)
+        )
+        
+        // Creating CertificateConstraints should succeed (unknown extensions don't cause failure)
+        XCTAssertNoThrow(try {
+            let constraints = try CertificateConstraints(from: certificate)
+            // Verify known extensions are parsed
+            XCTAssertTrue(constraints.permitPTY)
+            XCTAssertTrue(constraints.permitX11Forwarding)
+            XCTAssertFalse(constraints.permitAgentForwarding)  // Not present
+        }())
+        
+        // Note: In a real test environment, you would capture logs to verify the warnings
+        // For now, we just verify that unknown extensions don't cause parsing to fail
+    }
+    
+    // MARK: - Principal Limit Tests
+    
+    func testPrincipalLimit_ExactlyAtLimit_Succeeds() throws {
+        // Create a certificate with exactly 256 principals
+        let principals = (0..<256).map { "user\($0)" }
+        
+        // Create raw certificate data
+        var buffer = ByteBufferAllocator().buffer(capacity: 10000)
+        buffer.writeSSHString("ssh-ed25519-cert-v01@openssh.com")
+        buffer.writeSSHData(Data(repeating: 0, count: 32)) // nonce
+        buffer.writeSSHData(Data(repeating: 0, count: 32)) // public key
+        buffer.writeInteger(UInt64(1)) // serial
+        buffer.writeInteger(UInt32(1)) // type (user)
+        buffer.writeSSHString("test@example.com") // key ID
+        
+        // Write principals buffer
+        var principalsBuffer = ByteBufferAllocator().buffer(capacity: 5000)
+        for principal in principals {
+            principalsBuffer.writeSSHString(principal)
+        }
+        buffer.writeSSHData(Data(principalsBuffer.readableBytesView))
+        
+        buffer.writeInteger(UInt64(0)) // valid after
+        buffer.writeInteger(UInt64.max) // valid before
+        buffer.writeSSHData(Data()) // critical options
+        buffer.writeSSHData(Data()) // extensions
+        buffer.writeSSHData(Data()) // reserved
+        
+        // Add a fake CA key
+        var caKeyBuffer = ByteBufferAllocator().buffer(capacity: 100)
+        caKeyBuffer.writeSSHString("ssh-ed25519")
+        caKeyBuffer.writeSSHData(Data(repeating: 0, count: 32))
+        buffer.writeSSHData(Data(caKeyBuffer.readableBytesView))
+        
+        // Add a fake signature
+        var sigBuffer = ByteBufferAllocator().buffer(capacity: 100)
+        sigBuffer.writeSSHString("ssh-ed25519")
+        sigBuffer.writeSSHData(Data(repeating: 0, count: 64))
+        buffer.writeSSHData(Data(sigBuffer.readableBytesView))
+        
+        let certData = Data(buffer.readableBytesView)
+        
+        // Should succeed with exactly 256 principals
+        do {
+            let certificate = try SSHCertificate(from: certData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")
+            XCTAssertEqual(certificate.validPrincipals.count, 256)
+        } catch {
+            // If it fails due to signature verification, that's expected
+            // We're only testing the principal limit here
+            if case SSHCertificateError.invalidSignature = error {
+                // Expected - we're using fake signatures
+            } else if case SSHCertificateError.tooManyPrincipals = error {
+                XCTFail("Should not fail with exactly 256 principals")
+            } else {
+                // Other errors might occur due to our fake certificate
+                print("Certificate parsing failed with: \(error)")
+            }
+        }
+    }
+    
+    func testPrincipalLimit_ExceedsLimit_Fails() throws {
+        // Create a certificate with 257 principals (one over the limit)
+        let principals = (0..<257).map { "user\($0)" }
+        
+        // Create raw certificate data
+        var buffer = ByteBufferAllocator().buffer(capacity: 10000)
+        buffer.writeSSHString("ssh-ed25519-cert-v01@openssh.com")
+        buffer.writeSSHData(Data(repeating: 0, count: 32)) // nonce
+        buffer.writeSSHData(Data(repeating: 0, count: 32)) // public key
+        buffer.writeInteger(UInt64(1)) // serial
+        buffer.writeInteger(UInt32(1)) // type (user)
+        buffer.writeSSHString("test@example.com") // key ID
+        
+        // Write principals buffer
+        var principalsBuffer = ByteBufferAllocator().buffer(capacity: 5000)
+        for principal in principals {
+            principalsBuffer.writeSSHString(principal)
+        }
+        buffer.writeSSHData(Data(principalsBuffer.readableBytesView))
+        
+        buffer.writeInteger(UInt64(0)) // valid after
+        buffer.writeInteger(UInt64.max) // valid before
+        buffer.writeSSHData(Data()) // critical options
+        buffer.writeSSHData(Data()) // extensions
+        buffer.writeSSHData(Data()) // reserved
+        
+        // Add a fake CA key
+        var caKeyBuffer = ByteBufferAllocator().buffer(capacity: 100)
+        caKeyBuffer.writeSSHString("ssh-ed25519")
+        caKeyBuffer.writeSSHData(Data(repeating: 0, count: 32))
+        buffer.writeSSHData(Data(caKeyBuffer.readableBytesView))
+        
+        // Add a fake signature
+        var sigBuffer = ByteBufferAllocator().buffer(capacity: 100)
+        sigBuffer.writeSSHString("ssh-ed25519")
+        sigBuffer.writeSSHData(Data(repeating: 0, count: 64))
+        buffer.writeSSHData(Data(sigBuffer.readableBytesView))
+        
+        let certData = Data(buffer.readableBytesView)
+        
+        // Should fail with 257 principals
+        XCTAssertThrowsError(try SSHCertificate(from: certData, expectedKeyType: "ssh-ed25519-cert-v01@openssh.com")) { error in
+            guard case SSHCertificateError.tooManyPrincipals(let count, let maximum) = error else {
+                XCTFail("Expected tooManyPrincipals error, got \(error)")
+                return
+            }
+            XCTAssertEqual(count, 257)
+            XCTAssertEqual(maximum, 256)
+        }
+    }
+    
     // MARK: - Complete Validation Tests
     
     func testCompleteValidation_ValidCertificate_Succeeds() throws {
@@ -469,5 +618,99 @@ final class CertificateValidationTests: XCTestCase {
         
         // Should throw an error (no trusted CAs)
         XCTAssertThrowsError(try SSHCertificateValidator.validate(certificate, context: context))
+    }
+    
+    // MARK: - Extension Tests
+    
+    func testNoTouchRequiredExtension() throws {
+        // Create a certificate with no-touch-required extension
+        let certificate = SSHCertificate(
+            nonce: Data(repeating: 0, count: 32),
+            serial: 1,
+            type: .user,
+            keyId: "test@example.com",
+            validPrincipals: ["testuser"],
+            validAfter: 0,
+            validBefore: UInt64.max,
+            criticalOptions: [],
+            extensions: [
+                ("permit-pty", Data()),
+                ("permit-port-forwarding", Data()),
+                ("no-touch-required", Data())
+            ],
+            reserved: Data(),
+            signatureKey: Data(),
+            signature: Data(),
+            publicKey: Data(repeating: 0, count: 32)
+        )
+        
+        // Check that no-touch-required extension is detected
+        XCTAssertTrue(certificate.noTouchRequired)
+        
+        // Check other extensions work too
+        XCTAssertTrue(certificate.permitPty)
+        XCTAssertTrue(certificate.permitPortForwarding)
+        XCTAssertFalse(certificate.permitAgentForwarding)
+        XCTAssertFalse(certificate.permitX11Forwarding)
+        XCTAssertFalse(certificate.permitUserRc)
+    }
+    
+    func testNoTouchRequiredInConstraints() throws {
+        // Create a certificate with no-touch-required extension
+        let certificate = SSHCertificate(
+            nonce: Data(repeating: 0, count: 32),
+            serial: 1,
+            type: .user,
+            keyId: "test@example.com",
+            validPrincipals: ["testuser"],
+            validAfter: 0,
+            validBefore: UInt64.max,
+            criticalOptions: [],
+            extensions: [
+                ("permit-pty", Data()),
+                ("no-touch-required", Data())
+            ],
+            reserved: Data(),
+            signatureKey: Data(),
+            signature: Data(),
+            publicKey: Data(repeating: 0, count: 32)
+        )
+        
+        // Parse constraints
+        let constraints = try CertificateConstraints(from: certificate)
+        
+        // Verify no-touch-required is properly parsed
+        XCTAssertTrue(constraints.noRequireUserPresence)
+        XCTAssertTrue(constraints.permitPTY)
+        XCTAssertFalse(constraints.permitPortForwarding)
+    }
+    
+    func testCertificateWithoutNoTouchRequired() throws {
+        // Create a certificate without no-touch-required extension
+        let certificate = SSHCertificate(
+            nonce: Data(repeating: 0, count: 32),
+            serial: 1,
+            type: .user,
+            keyId: "test@example.com",
+            validPrincipals: ["testuser"],
+            validAfter: 0,
+            validBefore: UInt64.max,
+            criticalOptions: [],
+            extensions: [
+                ("permit-pty", Data()),
+                ("permit-port-forwarding", Data())
+            ],
+            reserved: Data(),
+            signatureKey: Data(),
+            signature: Data(),
+            publicKey: Data(repeating: 0, count: 32)
+        )
+        
+        // Check that no-touch-required extension is not present
+        XCTAssertFalse(certificate.noTouchRequired)
+        
+        // Parse constraints
+        let constraints = try CertificateConstraints(from: certificate)
+        XCTAssertFalse(constraints.noRequireUserPresence)
     }
 }
