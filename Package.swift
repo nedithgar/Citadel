@@ -48,9 +48,6 @@ let package = Package(
                 .product(name: "NIOSSH", package: "Joannis-swift-nio-ssh"),
                 .product(name: "BigInt", package: "BigInt"),
                 .product(name: "Logging", package: "swift-log"),
-            ],
-            resources: [
-                .copy("TestCertificates")
             ]
         ),
     ]
