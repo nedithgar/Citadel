@@ -1,7 +1,0 @@
-# Ignore private keys
-ca_*
-user_*
-host_*
-!*.pub
-!generate_test_certificates.sh
-!.gitignore

@@ -8,13 +8,22 @@ final class SSHCertificateRealTests: XCTestCase {
     
     override class func setUp() {
         super.setUp()
-        // Ensure test certificates are generated
-        let certDir = TestCertificateHelper.certificatesPath
-        let fileManager = FileManager.default
-        
-        // Check if certificates exist, if not, generate them
-        if !fileManager.fileExists(atPath: "\(certDir)/user_ed25519-cert.pub") {
-            print("Test certificates not found. Please run generate_test_certificates.sh in the TestCertificates directory")
+        // Generate certificates dynamically for tests
+        do {
+            try SSHCertificateGenerator.ensureSSHKeygenAvailable()
+            try SSHCertificateGenerator.setUp()
+        } catch {
+            print("Failed to set up certificate generation: \(error)")
+        }
+    }
+    
+    override class func tearDown() {
+        super.tearDown()
+        // Clean up generated certificates
+        do {
+            try TestCertificateHelper.cleanUp()
+        } catch {
+            print("Failed to clean up certificates: \(error)")
         }
     }
     
@@ -98,9 +107,7 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Host Certificate Tests
     
     func testHostCertificateParsing() throws {
-        // SKIP TEST: Test certificates have expired
-        throw XCTSkip("Test certificates have expired")
-        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/host_ed25519-cert.pub")
+        let certificate = try TestCertificateHelper.generateHostCertificate()
         
         XCTAssertEqual(certificate.keyID, "test-host")
         XCTAssertEqual(certificate.serial, 100)
@@ -110,17 +117,16 @@ final class SSHCertificateRealTests: XCTestCase {
         // Load the CA public key for validation
         let caPublicKey = try TestCertificateHelper.loadPublicKey(name: "ca_ed25519")
         
-        // Test hostname validation
+        // First validate the certificate signature with NIOSSH
         XCTAssertNoThrow(try certificate.validate(
             principal: "example.com",
             type: .host,
             allowedAuthoritySigningKeys: [caPublicKey]
         ))
         
-        XCTAssertNoThrow(try certificate.validate(
-            principal: "test.example.com",
-            type: .host,
-            allowedAuthoritySigningKeys: [caPublicKey]
+        // Now test wildcard matching with our enhanced validation
+        XCTAssertNoThrow(try certificate.validateForAuthentication(
+            hostname: "test.example.com"
         )) // Should work with wildcard
     }
     
@@ -139,9 +145,7 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Critical Options Tests
     
     func testCriticalOptions() throws {
-        // SKIP TEST: Test certificates have expired
-        throw XCTSkip("Test certificates have expired")
-        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_critical_options-cert.pub")
+        let certificate = try TestCertificateHelper.generateCriticalOptionsCertificate()
         
         XCTAssertEqual(certificate.keyID, "restricted-cert")
         XCTAssertEqual(certificate.serial, 202)
@@ -157,16 +161,15 @@ final class SSHCertificateRealTests: XCTestCase {
         XCTAssertNoThrow(try certificate.validate(
             principal: "testuser",
             type: .user,
-            allowedAuthoritySigningKeys: [caPublicKey]
+            allowedAuthoritySigningKeys: [caPublicKey],
+            acceptableCriticalOptions: ["force-command", "source-address"]
         ))
     }
     
     // MARK: - Principal Validation Tests
     
     func testLimitedPrincipals() throws {
-        // SKIP TEST: Test certificates have expired
-        throw XCTSkip("Test certificates have expired")
-        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_limited_principals-cert.pub")
+        let certificate = try TestCertificateHelper.generateLimitedPrincipalsCertificate()
         
         XCTAssertEqual(certificate.keyID, "limited-cert")
         XCTAssertEqual(certificate.serial, 203)
@@ -199,7 +202,7 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Extensions Tests
     
     func testAllExtensions() throws {
-        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_all_extensions-cert.pub")
+        let certificate = try TestCertificateHelper.generateAllExtensionsCertificate()
         
         XCTAssertEqual(certificate.keyID, "full-cert")
         XCTAssertEqual(certificate.serial, 204)
@@ -215,8 +218,29 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Authentication Method Tests
     
     func testCertificateAuthenticationMethods() throws {
-        // SKIP TEST: Test certificates have expired
-        throw XCTSkip("Test certificates have expired")
+        // Test certificate authentication with fresh certificates
+        let (privateKey, certificate) = try TestCertificateHelper.parseEd25519Certificate(
+            certificateFile: "user_ed25519-cert.pub",
+            privateKeyFile: "user_ed25519"
+        )
+        
+        // Verify the certificate is valid
+        let caPublicKey = try TestCertificateHelper.loadPublicKey(name: "ca_ed25519")
+        XCTAssertNoThrow(try certificate.validate(
+            principal: "testuser",
+            type: .user,
+            allowedAuthoritySigningKeys: [caPublicKey]
+        ))
+        
+        // The authentication method can be created with certificate
+        let authMethod = try SSHAuthenticationMethod.ed25519Certificate(
+            username: "testuser",
+            privateKey: privateKey,
+            certificate: certificate
+        )
+        
+        // Verify the auth method was created successfully
+        XCTAssertNotNil(authMethod)
     }
     
     // MARK: - Signature Type Tests

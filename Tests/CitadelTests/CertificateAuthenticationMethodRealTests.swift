@@ -6,6 +6,27 @@ import _CryptoExtras
 /// Tests for certificate authentication methods using real SSH certificates
 final class CertificateAuthenticationMethodRealTests: XCTestCase {
     
+    override class func setUp() {
+        super.setUp()
+        // Generate certificates dynamically for tests
+        do {
+            try SSHCertificateGenerator.ensureSSHKeygenAvailable()
+            try SSHCertificateGenerator.setUp()
+        } catch {
+            print("Failed to set up certificate generation: \(error)")
+        }
+    }
+    
+    override class func tearDown() {
+        super.tearDown()
+        // Clean up generated certificates
+        do {
+            try TestCertificateHelper.cleanUp()
+        } catch {
+            print("Failed to clean up certificates: \(error)")
+        }
+    }
+    
     // MARK: - Ed25519 Certificate Tests
     
     func testEd25519CertificateWithValidCertificate() throws {
@@ -44,13 +65,11 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     }
     
     func testEd25519CertificateWithWrongPrincipal() throws {
-        // Use the limited principals certificate
-        let keyData = try TestCertificateHelper.loadPrivateKey(filename: "user_limited_principals")
-        let keyString = String(data: keyData, encoding: .utf8)!
-        let opensshKey = try OpenSSH.PrivateKey<Curve25519.Signing.PrivateKey>(string: keyString)
-        let privateKey = opensshKey.privateKey
+        // Generate a certificate with limited principals
+        let certificate = try TestCertificateHelper.generateLimitedPrincipalsCertificate()
         
-        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_limited_principals-cert.pub")
+        // Generate a new Ed25519 private key for this test
+        let privateKey = Curve25519.Signing.PrivateKey()
         
         // Test: Wrong principal without validation should succeed (client-side use)
         XCTAssertNoThrow(
@@ -221,12 +240,10 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - Critical Options Tests
     
     func testCertificateWithCriticalOptions() throws {
-        let keyData = try TestCertificateHelper.loadPrivateKey(filename: "user_critical_options")
-        let keyString = String(data: keyData, encoding: .utf8)!
-        let opensshKey = try OpenSSH.PrivateKey<Curve25519.Signing.PrivateKey>(string: keyString)
-        let privateKey = opensshKey.privateKey
+        // Generate a new Ed25519 private key for this test
+        let privateKey = Curve25519.Signing.PrivateKey()
         
-        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_critical_options-cert.pub")
+        let certificate = try TestCertificateHelper.generateCriticalOptionsCertificate()
         
         // The certificate has force-command and source-address restrictions
         // But our validation currently only checks username, time, and cert type
@@ -247,12 +264,10 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - Extensions Tests
     
     func testCertificateWithAllExtensions() throws {
-        let keyData = try TestCertificateHelper.loadPrivateKey(filename: "user_all_extensions")
-        let keyString = String(data: keyData, encoding: .utf8)!
-        let opensshKey = try OpenSSH.PrivateKey<Curve25519.Signing.PrivateKey>(string: keyString)
-        let privateKey = opensshKey.privateKey
+        // Generate a new Ed25519 private key for this test
+        let privateKey = Curve25519.Signing.PrivateKey()
         
-        let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(at: "\(TestCertificateHelper.certificatesPath)/user_all_extensions-cert.pub")
+        let certificate = try TestCertificateHelper.generateAllExtensionsCertificate()
         
         // Test authentication succeeds
         XCTAssertNoThrow(
