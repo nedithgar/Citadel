@@ -13,6 +13,7 @@ final class SSHCertificateRealTests: XCTestCase {
             try SSHCertificateGenerator.ensureSSHKeygenAvailable()
             try SSHCertificateGenerator.setUp()
         } catch {
+            XCTFail("Certificate generation setup failed: \(error)")
         }
     }
     
@@ -22,12 +23,23 @@ final class SSHCertificateRealTests: XCTestCase {
         do {
             try TestCertificateHelper.cleanUp()
         } catch {
+            XCTFail("Certificate cleanup failed: \(error)")
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    /// Check if certificate setup was successful, fail test if not
+    private func requireCertificateSetup() {
+        guard SSHCertificateGenerator.isSetupSuccessful else {
+            XCTFail("Certificate generation setup failed - ssh-keygen may not be available")
         }
     }
     
     // MARK: - Basic Certificate Parsing Tests
     
     func testEd25519CertificateParsing() throws {
+        requireCertificateSetup()
         let (_, certificate) = try TestCertificateHelper.parseEd25519Certificate(
             certificateFile: "user_ed25519-cert.pub",
             privateKeyFile: "user_ed25519"
@@ -44,6 +56,7 @@ final class SSHCertificateRealTests: XCTestCase {
     }
     
     func testP256CertificateParsing() throws {
+        requireCertificateSetup()
         let (_, certificate) = try TestCertificateHelper.parseP256Certificate(
             certificateFile: "user_ecdsa_p256-cert.pub",
             privateKeyFile: "user_ecdsa_p256"
@@ -59,6 +72,7 @@ final class SSHCertificateRealTests: XCTestCase {
     }
     
     func testP384CertificateParsing() throws {
+        requireCertificateSetup()
         let (_, certificate) = try TestCertificateHelper.parseP384Certificate(
             certificateFile: "user_ecdsa_p384-cert.pub",
             privateKeyFile: "user_ecdsa_p384"
@@ -74,6 +88,7 @@ final class SSHCertificateRealTests: XCTestCase {
     }
     
     func testP521CertificateParsing() throws {
+        requireCertificateSetup()
         let (_, certificate) = try TestCertificateHelper.parseP521Certificate(
             certificateFile: "user_ecdsa_p521-cert.pub",
             privateKeyFile: "user_ecdsa_p521"
@@ -92,6 +107,7 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Host Certificate Tests
     
     func testHostCertificateParsing() throws {
+        requireCertificateSetup()
         let certificate = try TestCertificateHelper.generateHostCertificate()
         
         XCTAssertEqual(certificate.keyID, "test-host")
@@ -121,6 +137,7 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Critical Options Tests
     
     func testCriticalOptions() throws {
+        requireCertificateSetup()
         let certificate = try TestCertificateHelper.generateCriticalOptionsCertificate()
         
         XCTAssertEqual(certificate.keyID, "restricted-cert")
@@ -145,6 +162,7 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Principal Validation Tests
     
     func testLimitedPrincipals() throws {
+        requireCertificateSetup()
         let certificate = try TestCertificateHelper.generateLimitedPrincipalsCertificate()
         
         XCTAssertEqual(certificate.keyID, "limited-cert")
@@ -178,6 +196,7 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Extensions Tests
     
     func testAllExtensions() throws {
+        requireCertificateSetup()
         let certificate = try TestCertificateHelper.generateAllExtensionsCertificate()
         
         XCTAssertEqual(certificate.keyID, "full-cert")
@@ -194,6 +213,7 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Authentication Method Tests
     
     func testCertificateAuthenticationMethods() throws {
+        requireCertificateSetup()
         // Test certificate authentication with fresh certificates
         let (privateKey, certificate) = try TestCertificateHelper.parseEd25519Certificate(
             certificateFile: "user_ed25519-cert.pub",

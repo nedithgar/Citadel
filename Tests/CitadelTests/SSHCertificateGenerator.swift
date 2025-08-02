@@ -4,6 +4,9 @@ import XCTest
 /// Helper class to generate SSH certificates dynamically during test runs
 enum SSHCertificateGenerator {
     
+    /// Track whether setup was successful
+    static var isSetupSuccessful = false
+    
     /// Temporary directory for generated certificates
     static var tempDirectory: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("CitadelTestCerts-\(ProcessInfo.processInfo.processIdentifier)")
@@ -12,6 +15,7 @@ enum SSHCertificateGenerator {
     /// Setup the temporary directory
     static func setUp() throws {
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        isSetupSuccessful = true
     }
     
     /// Clean up the temporary directory

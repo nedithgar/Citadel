@@ -15,6 +15,7 @@ final class ECDSACertificateRealTests: XCTestCase {
             try SSHCertificateGenerator.ensureSSHKeygenAvailable()
             try SSHCertificateGenerator.setUp()
         } catch {
+            XCTFail("Certificate generation setup failed: \(error)")
         }
     }
     
@@ -24,12 +25,23 @@ final class ECDSACertificateRealTests: XCTestCase {
         do {
             try TestCertificateHelper.cleanUp()
         } catch {
+            XCTFail("Certificate cleanup failed: \(error)")
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    /// Check if certificate setup was successful, fail test if not
+    private func requireCertificateSetup() {
+        guard SSHCertificateGenerator.isSetupSuccessful else {
+            XCTFail("Certificate generation setup failed - ssh-keygen may not be available")
         }
     }
     
     // MARK: - P256 Certificate Tests
     
     func testP256CertificateParsingWithRealCertificate() throws {
+        requireCertificateSetup()
         let (privateKey, certificate) = try TestCertificateHelper.parseP256Certificate(
             certificateFile: "user_ecdsa_p256-cert.pub",
             privateKeyFile: "user_ecdsa_p256"
@@ -48,6 +60,7 @@ final class ECDSACertificateRealTests: XCTestCase {
     }
     
     func testP256CertificateValidation() throws {
+        requireCertificateSetup()
         // Principal validation with fresh certificates
         let (_, certificate) = try TestCertificateHelper.parseP256Certificate(
             certificateFile: "user_ecdsa_p256-cert.pub",
@@ -77,6 +90,7 @@ final class ECDSACertificateRealTests: XCTestCase {
     // MARK: - P384 Certificate Tests
     
     func testP384CertificateParsingWithRealCertificate() throws {
+        requireCertificateSetup()
         let (privateKey, certificate) = try TestCertificateHelper.parseP384Certificate(
             certificateFile: "user_ecdsa_p384-cert.pub",
             privateKeyFile: "user_ecdsa_p384"
@@ -95,6 +109,7 @@ final class ECDSACertificateRealTests: XCTestCase {
     }
     
     func testP384CertificateMultiplePrincipals() throws {
+        requireCertificateSetup()
         let (_, certificate) = try TestCertificateHelper.parseP384Certificate(
             certificateFile: "user_ecdsa_p384-cert.pub",
             privateKeyFile: "user_ecdsa_p384"
@@ -127,6 +142,7 @@ final class ECDSACertificateRealTests: XCTestCase {
     // MARK: - P521 Certificate Tests
     
     func testP521CertificateParsingWithRealCertificate() throws {
+        requireCertificateSetup()
         let (privateKey, certificate) = try TestCertificateHelper.parseP521Certificate(
             certificateFile: "user_ecdsa_p521-cert.pub",
             privateKeyFile: "user_ecdsa_p521"
@@ -147,6 +163,7 @@ final class ECDSACertificateRealTests: XCTestCase {
     // MARK: - Certificate Equality Tests
     
     func testCertificateEqualityWithRealCertificates() throws {
+        requireCertificateSetup()
         // Generate two P256 certificates with the same configuration
         let (_, cert1) = try TestCertificateHelper.parseP256Certificate(
             certificateFile: "user_ecdsa_p256-cert.pub",
@@ -178,6 +195,7 @@ final class ECDSACertificateRealTests: XCTestCase {
     // MARK: - Invalid Certificate Tests
     
     func testInvalidCertificateData() throws {
+        requireCertificateSetup()
         // Test with completely invalid data
         let invalidData = Data("This is not a certificate".utf8)
         XCTAssertThrowsError(try NIOSSHCertificateLoader.loadFromBinaryData(invalidData)) { error in
@@ -195,6 +213,7 @@ final class ECDSACertificateRealTests: XCTestCase {
     }
     
     func testCertificateTimeValidation() throws {
+        requireCertificateSetup()
         // Generate a certificate with known validity period
         let (_, certificate) = try TestCertificateHelper.parseP256Certificate(
             certificateFile: "user_ecdsa_p256-cert.pub",
@@ -219,6 +238,7 @@ final class ECDSACertificateRealTests: XCTestCase {
     // MARK: - Key Size Tests
     
     func testAllCurveSizes() throws {
+        requireCertificateSetup()
         // Test that the public key sizes are correct for each curve
         let (_, p256Cert) = try TestCertificateHelper.parseP256Certificate(
             certificateFile: "user_ecdsa_p256-cert.pub",
