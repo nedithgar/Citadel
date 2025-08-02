@@ -355,8 +355,6 @@ final class KeyTests: XCTestCase {
         // Verify we can read it back
         let p256Parsed = try P256.Signing.PrivateKey(sshECDSA: p256SSH)
         // Check if public keys match
-        print("Original P256 public key: \(p256Key.publicKey.x963Representation.base64EncodedString())")
-        print("Parsed P256 public key: \(p256Parsed.publicKey.x963Representation.base64EncodedString())")
         XCTAssertEqual(p256Key.publicKey.x963Representation, p256Parsed.publicKey.x963Representation)
         
         // Test ECDSA P-384 key generation and export
@@ -408,10 +406,6 @@ final class KeyTests: XCTestCase {
             passphrase: passphrase
         )
         
-        // Debug: print the generated key
-        print("Generated encrypted key:")
-        print(ed25519Encrypted)
-        
         // Should contain encryption markers in the base64 content, not the PEM wrapper
         let lines = ed25519Encrypted.split(separator: "\n")
         if lines.count > 2 {
@@ -419,9 +413,6 @@ final class KeyTests: XCTestCase {
             if let decodedData = Data(base64Encoded: base64Content) {
                 // The decoded data starts with openssh-key-v1\0 and contains cipher and kdf strings
                 let decodedString = String(decoding: decodedData, as: UTF8.self)
-                print("Decoded binary contains openssh-key-v1: \(decodedString.contains("openssh-key-v1"))")
-                print("Decoded binary contains aes256-ctr: \(decodedString.contains("aes256-ctr"))")
-                print("Decoded binary contains bcrypt: \(decodedString.contains("bcrypt"))")
                 XCTAssertTrue(decodedString.contains("aes256-ctr") || decodedString.contains("aes128-ctr"))
                 XCTAssertTrue(decodedString.contains("bcrypt"))
             } else {

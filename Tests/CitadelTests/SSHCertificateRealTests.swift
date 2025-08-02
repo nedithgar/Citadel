@@ -13,7 +13,6 @@ final class SSHCertificateRealTests: XCTestCase {
             try SSHCertificateGenerator.ensureSSHKeygenAvailable()
             try SSHCertificateGenerator.setUp()
         } catch {
-            print("Failed to set up certificate generation: \(error)")
         }
     }
     
@@ -23,7 +22,6 @@ final class SSHCertificateRealTests: XCTestCase {
         do {
             try TestCertificateHelper.cleanUp()
         } catch {
-            print("Failed to clean up certificates: \(error)")
         }
     }
     
