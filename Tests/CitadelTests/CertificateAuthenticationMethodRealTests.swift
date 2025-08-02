@@ -6,18 +6,32 @@ import _CryptoExtras
 /// Tests for certificate authentication methods using real SSH certificates
 final class CertificateAuthenticationMethodRealTests: XCTestCase {
     
-    override class func setUp() {
+    override func setUp() {
         super.setUp()
-        // Generate certificates dynamically for tests
-        do {
-            try SSHCertificateGenerator.ensureSSHKeygenAvailable()
-            try SSHCertificateGenerator.setUp()
-        } catch {
-            XCTFail("Certificate generation setup failed: \(error)")
+        // Generate certificates dynamically for tests (only once)
+        if !SSHCertificateGenerator.hasAttemptedSetup {
+            SSHCertificateGenerator.hasAttemptedSetup = true
+            do {
+                try SSHCertificateGenerator.ensureSSHKeygenAvailable()
+                try SSHCertificateGenerator.setUp()
+                SSHCertificateGenerator.isSetupSuccessful = true
+            } catch {
+                SSHCertificateGenerator.setupError = error
+                SSHCertificateGenerator.isSetupSuccessful = false
+            }
+        }
+        
+        // Check setup success for each test
+        if !SSHCertificateGenerator.isSetupSuccessful {
+            if let error = SSHCertificateGenerator.setupError {
+                XCTFail("Certificate generation setup failed: \(error)")
+            } else {
+                XCTFail("Certificate generation setup failed")
+            }
         }
     }
     
-    override class func tearDown() {
+    override func tearDown() {
         super.tearDown()
         // Clean up generated certificates
         do {
@@ -27,20 +41,10 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
         }
     }
     
-    // MARK: - Helper Methods
-    
-    /// Check if certificate setup was successful, fail test if not
-    private func requireCertificateSetup() {
-        guard SSHCertificateGenerator.isSetupSuccessful else {
-            XCTFail("Certificate generation setup failed - ssh-keygen may not be available")
-        }
-    }
-    
     // MARK: - Ed25519 Certificate Tests
     
     func testEd25519CertificateWithValidCertificate() throws {
-        requireCertificateSetup()
-        
+                
         let (privateKey, certificate) = try TestCertificateHelper.parseEd25519Certificate(
             certificateFile: "user_ed25519-cert.pub",
             privateKeyFile: "user_ed25519"
@@ -69,8 +73,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     }
     
     func testEd25519CertificateWithExpiredCertificate() throws {
-        requireCertificateSetup()
-        
+                
         // SKIP TEST: Time-based validation tests require certificates with specific validity periods
         // The test certificates are generated with 1 hour validity and may have been regenerated
         // making this test unreliable. The time validation logic is tested in CertificateSecurityValidationTests
@@ -78,8 +81,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     }
     
     func testEd25519CertificateWithWrongPrincipal() throws {
-        requireCertificateSetup()
-        
+                
         // Generate a certificate with limited principals
         let certificate = try TestCertificateHelper.generateLimitedPrincipalsCertificate()
         
@@ -102,8 +104,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - P256 Certificate Tests
     
     func testP256CertificateValidation() throws {
-        requireCertificateSetup()
-        
+                
         let (privateKey, certificate) = try TestCertificateHelper.parseP256Certificate(
             certificateFile: "user_ecdsa_p256-cert.pub",
             privateKeyFile: "user_ecdsa_p256"
@@ -134,8 +135,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - RSA Certificate Tests
     
     func testRSACertificateValidation() throws {
-        requireCertificateSetup()
-        
+                
         // SKIP TEST: RSA certificates are not supported by NIOSSH
         // While Citadel can parse and validate RSA certificates correctly,
         // NIOSSH (the underlying SSH library) does not support RSA certificates
@@ -165,8 +165,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     }
     
     func testRSACertificateWithHostType() throws {
-        requireCertificateSetup()
-        
+                
         // SKIP TEST: Certificate type validation is not enforced in user authentication
         // The current implementation only validates certificate type when checking
         // principals (username for user certs, hostname for host certs).
@@ -209,8 +208,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - P384 Certificate Tests
     
     func testP384CertificateWithMultiplePrincipals() throws {
-        requireCertificateSetup()
-        
+                
         let (privateKey, certificate) = try TestCertificateHelper.parseP384Certificate(
             certificateFile: "user_ecdsa_p384-cert.pub",
             privateKeyFile: "user_ecdsa_p384"
@@ -237,8 +235,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - P521 Certificate Tests
     
     func testP521CertificateValidation() throws {
-        requireCertificateSetup()
-        
+                
         let (privateKey, certificate) = try TestCertificateHelper.parseP521Certificate(
             certificateFile: "user_ecdsa_p521-cert.pub",
             privateKeyFile: "user_ecdsa_p521"
@@ -256,8 +253,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - Time-based Certificate Tests
     
     func testNotYetValidCertificate() throws {
-        requireCertificateSetup()
-        
+                
         // SKIP TEST: Time-based validation tests require certificates with specific validity periods
         // The test certificates are generated with specific future timestamps that may not be reliable
         // The time validation logic is tested in CertificateSecurityValidationTests
@@ -267,8 +263,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - Critical Options Tests
     
     func testCertificateWithCriticalOptions() throws {
-        requireCertificateSetup()
-        
+                
         // Generate a new Ed25519 private key for this test
         let privateKey = Curve25519.Signing.PrivateKey()
         
@@ -293,8 +288,7 @@ final class CertificateAuthenticationMethodRealTests: XCTestCase {
     // MARK: - Extensions Tests
     
     func testCertificateWithAllExtensions() throws {
-        requireCertificateSetup()
-        
+                
         // Generate a new Ed25519 private key for this test
         let privateKey = Curve25519.Signing.PrivateKey()
         

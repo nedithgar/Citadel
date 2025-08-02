@@ -7,6 +7,12 @@ enum SSHCertificateGenerator {
     /// Track whether setup was successful
     static var isSetupSuccessful = false
     
+    /// Track setup error if any
+    static var setupError: Error?
+    
+    /// Track whether setup has been attempted
+    static var hasAttemptedSetup = false
+    
     /// Temporary directory for generated certificates
     static var tempDirectory: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("CitadelTestCerts-\(ProcessInfo.processInfo.processIdentifier)")
