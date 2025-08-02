@@ -379,46 +379,7 @@ When you implement SFTP in Citadel, you're responsible for taking care of logist
 
 ## Helpers
 
-### SSH Key Generation
-
-Citadel provides a high-level API for generating SSH key pairs programmatically:
-
-```swift
-// Generate Ed25519 key pair (recommended for most cases)
-let keyPair = SSHKeyGenerator.generateEd25519()
-
-// Generate RSA key pair
-let rsaKeyPair = SSHKeyGenerator.generateRSA(bits: 4096)
-
-// Generate ECDSA key pair
-let ecdsaKeyPair = SSHKeyGenerator.generateECDSA(curve: .p256)
-
-// Export keys in various formats
-
-/// OpenSSH format
-let privateKeyString = try keyPair.privateKeyOpenSSHString(comment: "user@example.com")
-let publicKeyString = try keyPair.publicKeyOpenSSHString() // ssh-ed25519 AAAA...
-
-/// PEM format
-let publicKeyPEM = try keyPair.publicKeyPEMString()
-let privateKeyPEM = try keyPair.privateKeyPEMString()
-
-// Export with passphrase protection
-let encryptedKey = try keyPair.privateKeyOpenSSHString(
-    comment: "user@example.com",
-    passphrase: "secure_passphrase",
-    cipher: "aes256-ctr"  // Supported: "none", "aes128-ctr", "aes256-ctr"
-)
-
-// Save keys to files
-try privateKeyString.write(toFile: "~/.ssh/id_ed25519", atomically: true, encoding: .utf8)
-try publicKeyString.write(toFile: "~/.ssh/id_ed25519.pub", atomically: true, encoding: .utf8)
-```
-
-### OpenSSH Key Parsing
-
-We support extensions on PrivateKey types such as our own `Insecure.RSA.PrivateKey`, as well as existing SwiftCrypto types like `Curve25519.Signing.PrivateKey`:
-
+The most important helper most people need is OpenSSH key parsing. We support extensions on PrivateKey types such as our own `Insecure.RSA.PrivateKey`, as well as existing SwiftCrypto types like `Curve25519.Signing.PrivateKey`:
 ```swift
 // Parse an OpenSSH RSA private key. This is the same format as the one used by OpenSSH
 let sshFile = try String(contentsOf: ..)
