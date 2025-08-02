@@ -82,7 +82,7 @@ final class ECDSAKeyTests: XCTestCase {
     
     func testParseEncryptedP256PrivateKey() throws {
         // Create a test encrypted key by generating one
-        let originalKey = P256.Signing.PrivateKey()
+        let _ = P256.Signing.PrivateKey()
         let passphrase = "testpassphrase"
         
         // We would need to implement key serialization to test encrypted keys
@@ -118,5 +118,228 @@ final class ECDSAKeyTests: XCTestCase {
         
         // This should fail because the key is P-384 but we're trying to parse as P-256
         XCTAssertThrowsError(try P256.Signing.PrivateKey(sshECDSA: ecdsaP384PrivateKey))
+    }
+    
+    // MARK: - PEM/PKCS#8 Tests
+    
+    func testP256PEMPrivateKey() throws {
+        // Generate a new key and test PEM export/import
+        let originalKey = P256.Signing.PrivateKey()
+        
+        // Export to PEM
+        let pemString = originalKey.pemRepresentation
+        
+        // Verify PEM format
+        XCTAssertTrue(pemString.hasPrefix("-----BEGIN PRIVATE KEY-----"))
+        XCTAssertTrue(pemString.contains("-----END PRIVATE KEY-----"))
+        
+        // Import from PEM
+        let importedKey = try P256.Signing.PrivateKey(pemRepresentation: pemString)
+        
+        // Verify the keys are equivalent by comparing raw representations
+        XCTAssertEqual(originalKey.rawRepresentation, importedKey.rawRepresentation)
+        
+        // Test DER representation
+        let derData = originalKey.derRepresentation
+        let keyFromDER = try P256.Signing.PrivateKey(derRepresentation: derData)
+        XCTAssertEqual(originalKey.rawRepresentation, keyFromDER.rawRepresentation)
+    }
+    
+    func testP256PEMPublicKey() throws {
+        // Generate a new key and test public key PEM export/import
+        let privateKey = P256.Signing.PrivateKey()
+        let originalPublicKey = privateKey.publicKey
+        
+        // Export to PEM
+        let pemString = originalPublicKey.pemRepresentation
+        
+        // Verify PEM format
+        XCTAssertTrue(pemString.hasPrefix("-----BEGIN PUBLIC KEY-----"))
+        XCTAssertTrue(pemString.contains("-----END PUBLIC KEY-----"))
+        
+        // Import from PEM
+        let importedKey = try P256.Signing.PublicKey(pemRepresentation: pemString)
+        
+        // Verify the keys are equivalent
+        XCTAssertEqual(originalPublicKey.rawRepresentation, importedKey.rawRepresentation)
+    }
+    
+    func testP384PEMPrivateKey() throws {
+        // Generate a new key and test PEM export/import
+        let originalKey = P384.Signing.PrivateKey()
+        
+        // Export to PEM
+        let pemString = originalKey.pemRepresentation
+        
+        // Verify PEM format
+        XCTAssertTrue(pemString.hasPrefix("-----BEGIN PRIVATE KEY-----"))
+        XCTAssertTrue(pemString.contains("-----END PRIVATE KEY-----"))
+        
+        // Import from PEM
+        let importedKey = try P384.Signing.PrivateKey(pemRepresentation: pemString)
+        
+        // Verify the keys are equivalent
+        XCTAssertEqual(originalKey.rawRepresentation, importedKey.rawRepresentation)
+        
+        // Test DER representation
+        let derData = originalKey.derRepresentation
+        let keyFromDER = try P384.Signing.PrivateKey(derRepresentation: derData)
+        XCTAssertEqual(originalKey.rawRepresentation, keyFromDER.rawRepresentation)
+    }
+    
+    func testP384PEMPublicKey() throws {
+        // Generate a new key and test public key PEM export/import
+        let privateKey = P384.Signing.PrivateKey()
+        let originalPublicKey = privateKey.publicKey
+        
+        // Export to PEM
+        let pemString = originalPublicKey.pemRepresentation
+        
+        // Verify PEM format
+        XCTAssertTrue(pemString.hasPrefix("-----BEGIN PUBLIC KEY-----"))
+        XCTAssertTrue(pemString.contains("-----END PUBLIC KEY-----"))
+        
+        // Import from PEM
+        let importedKey = try P384.Signing.PublicKey(pemRepresentation: pemString)
+        
+        // Verify the keys are equivalent
+        XCTAssertEqual(originalPublicKey.rawRepresentation, importedKey.rawRepresentation)
+    }
+    
+    func testP521PEMPrivateKey() throws {
+        // Generate a new key and test PEM export/import
+        let originalKey = P521.Signing.PrivateKey()
+        
+        // Export to PEM
+        let pemString = originalKey.pemRepresentation
+        
+        // Verify PEM format
+        XCTAssertTrue(pemString.hasPrefix("-----BEGIN PRIVATE KEY-----"))
+        XCTAssertTrue(pemString.contains("-----END PRIVATE KEY-----"))
+        
+        // Import from PEM
+        let importedKey = try P521.Signing.PrivateKey(pemRepresentation: pemString)
+        
+        // Verify the keys are equivalent
+        XCTAssertEqual(originalKey.rawRepresentation, importedKey.rawRepresentation)
+        
+        // Test DER representation
+        let derData = originalKey.derRepresentation
+        let keyFromDER = try P521.Signing.PrivateKey(derRepresentation: derData)
+        XCTAssertEqual(originalKey.rawRepresentation, keyFromDER.rawRepresentation)
+    }
+    
+    func testP521PEMPublicKey() throws {
+        // Generate a new key and test public key PEM export/import
+        let privateKey = P521.Signing.PrivateKey()
+        let originalPublicKey = privateKey.publicKey
+        
+        // Export to PEM
+        let pemString = originalPublicKey.pemRepresentation
+        
+        // Verify PEM format
+        XCTAssertTrue(pemString.hasPrefix("-----BEGIN PUBLIC KEY-----"))
+        XCTAssertTrue(pemString.contains("-----END PUBLIC KEY-----"))
+        
+        // Import from PEM
+        let importedKey = try P521.Signing.PublicKey(pemRepresentation: pemString)
+        
+        // Verify the keys are equivalent
+        XCTAssertEqual(originalPublicKey.rawRepresentation, importedKey.rawRepresentation)
+    }
+    
+    func testPEMToOpenSSHConversion() throws {
+        // Test converting between PEM and OpenSSH formats for P256
+        let p256Key = P256.Signing.PrivateKey()
+        
+        // Export to PEM
+        let pemRepresentation = p256Key.pemRepresentation
+        
+        // Import from PEM
+        let keyFromPEM = try P256.Signing.PrivateKey(pemRepresentation: pemRepresentation)
+        
+        // Verify PEM round-trip works
+        XCTAssertEqual(p256Key.rawRepresentation, keyFromPEM.rawRepresentation)
+        
+        // Test OpenSSH generation and round-trip
+        let sshRepresentation = try keyFromPEM.makeSSHRepresentation()
+        let keyFromSSH = try P256.Signing.PrivateKey(sshECDSA: sshRepresentation)
+        XCTAssertEqual(p256Key.rawRepresentation, keyFromSSH.rawRepresentation)
+    }
+    
+    func testP384PEMToOpenSSHConversion() throws {
+        // Test converting between PEM and OpenSSH formats for P384
+        let p384Key = P384.Signing.PrivateKey()
+        
+        // Export to PEM
+        let pemRepresentation = p384Key.pemRepresentation
+        
+        // Import from PEM
+        let keyFromPEM = try P384.Signing.PrivateKey(pemRepresentation: pemRepresentation)
+        
+        // Verify PEM round-trip works
+        XCTAssertEqual(p384Key.rawRepresentation, keyFromPEM.rawRepresentation)
+        
+        // Test OpenSSH generation and round-trip
+        let sshRepresentation = try keyFromPEM.makeSSHRepresentation()
+        let keyFromSSH = try P384.Signing.PrivateKey(sshECDSA: sshRepresentation)
+        XCTAssertEqual(p384Key.rawRepresentation, keyFromSSH.rawRepresentation)
+    }
+    
+    func testP521PEMToOpenSSHConversion() throws {
+        // Test converting between PEM and OpenSSH formats for P521
+        let p521Key = P521.Signing.PrivateKey()
+        
+        // Export to PEM
+        let pemRepresentation = p521Key.pemRepresentation
+        
+        // Import from PEM
+        let keyFromPEM = try P521.Signing.PrivateKey(pemRepresentation: pemRepresentation)
+        
+        // Verify PEM round-trip works
+        XCTAssertEqual(p521Key.rawRepresentation, keyFromPEM.rawRepresentation)
+        
+        // Test OpenSSH generation and round-trip
+        let sshRepresentation = try keyFromPEM.makeSSHRepresentation()
+        let keyFromSSH = try P521.Signing.PrivateKey(sshECDSA: sshRepresentation)
+        XCTAssertEqual(p521Key.rawRepresentation, keyFromSSH.rawRepresentation)
+    }
+    
+    func testOpenSSHWithComment() throws {
+        // Test OpenSSH generation with custom comment
+        let p256Key = P256.Signing.PrivateKey()
+        let comment = "test@example.com"
+        
+        let sshRepresentation = try p256Key.makeSSHRepresentation(comment: comment)
+        let parsedKey = try OpenSSH.PrivateKey<P256.Signing.PrivateKey>(string: sshRepresentation)
+        
+        XCTAssertEqual(parsedKey.comment, comment)
+        XCTAssertEqual(p256Key.rawRepresentation, parsedKey.privateKey.rawRepresentation)
+    }
+    
+    func testInvalidPEMFormat() throws {
+        // Test invalid PEM strings
+        let invalidPEM = """
+        -----BEGIN PRIVATE KEY-----
+        InvalidBase64Data!@#$%
+        -----END PRIVATE KEY-----
+        """
+        
+        XCTAssertThrowsError(try P256.Signing.PrivateKey(pemRepresentation: invalidPEM))
+        XCTAssertThrowsError(try P384.Signing.PrivateKey(pemRepresentation: invalidPEM))
+        XCTAssertThrowsError(try P521.Signing.PrivateKey(pemRepresentation: invalidPEM))
+    }
+    
+    func testWrongCurvePEM() throws {
+        // Generate a P-256 key
+        let p256Key = P256.Signing.PrivateKey()
+        let p256PEM = p256Key.pemRepresentation
+        
+        // Should succeed for P256
+        XCTAssertNoThrow(try P256.Signing.PrivateKey(pemRepresentation: p256PEM))
+        
+        // Should fail for P384 and P521
+        XCTAssertThrowsError(try P384.Signing.PrivateKey(pemRepresentation: p256PEM))
+        XCTAssertThrowsError(try P521.Signing.PrivateKey(pemRepresentation: p256PEM))
     }
 }

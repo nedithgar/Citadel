@@ -6,8 +6,8 @@
         "repositoryURL": "https://github.com/attaswift/BigInt.git",
         "state": {
           "branch": null,
-          "revision": "0ed110f7555c34ff468e72e1686e59721f2b0da6",
-          "version": "5.3.0"
+          "revision": "e07e00fa1fd435143a2dcf8b7eec9a7710b2fdfe",
+          "version": "5.7.0"
         }
       },
       {
@@ -15,8 +15,17 @@
         "repositoryURL": "https://github.com/mtynior/ColorizeSwift.git",
         "state": {
           "branch": null,
-          "revision": "2a354639173d021f4648cf1912b2b00a3a7cd83c",
-          "version": "1.6.0"
+          "revision": "4e7daa138510b77a3cce9f6a31a116f8536347dd",
+          "version": "1.7.0"
+        }
+      },
+      {
+        "package": "swift-nio-ssh",
+        "repositoryURL": "https://github.com/nedithgar/Joannis-swift-nio-ssh.git",
+        "state": {
+          "branch": null,
+          "revision": "ab9c6b7c11ee68c60666b6349275bec15c5d853e",
+          "version": "0.3.5"
         }
       },
       {
@@ -42,8 +51,8 @@
         "repositoryURL": "https://github.com/apple/swift-collections.git",
         "state": {
           "branch": null,
-          "revision": "c1805596154bb3a265fd91b8ac0c4433b4348fb0",
-          "version": "1.2.0"
+          "revision": "8c0c0a8b49e080e54e5e328cc552821ff07cd341",
+          "version": "1.2.1"
         }
       },
       {
@@ -51,8 +60,8 @@
         "repositoryURL": "https://github.com/apple/swift-crypto.git",
         "state": {
           "branch": null,
-          "revision": "e8d6eba1fef23ae5b359c46b03f7d94be2f41fed",
-          "version": "3.12.3"
+          "revision": "176abc28e002a9952470f08745cd26fad9286776",
+          "version": "3.13.3"
         }
       },
       {
@@ -60,8 +69,8 @@
         "repositoryURL": "https://github.com/apple/swift-log.git",
         "state": {
           "branch": null,
-          "revision": "e97a6fcb1ab07462881ac165fdbb37f067e205d5",
-          "version": "1.5.4"
+          "revision": "ce592ae52f982c847a4efc0dd881cc9eb32d29f2",
+          "version": "1.6.4"
         }
       },
       {
@@ -69,17 +78,8 @@
         "repositoryURL": "https://github.com/apple/swift-nio.git",
         "state": {
           "branch": null,
-          "revision": "ad6b5f17270a7008f60d35ec5378e6144a575162",
-          "version": "2.84.0"
-        }
-      },
-      {
-        "package": "swift-nio-ssh",
-        "repositoryURL": "https://github.com/Joannis/swift-nio-ssh.git",
-        "state": {
-          "branch": null,
-          "revision": "b93961a2988607a756cbc21a811f406f27aa9ab6",
-          "version": "0.3.4"
+          "revision": "a5fea865badcb1c993c85b0f0e8d05a4bd2270fb",
+          "version": "2.85.0"
         }
       },
       {
@@ -87,8 +87,8 @@
         "repositoryURL": "https://github.com/apple/swift-system.git",
         "state": {
           "branch": null,
-          "revision": "61e4ca4b81b9e09e2ec863b00c340eb13497dac6",
-          "version": "1.5.0"
+          "revision": "b63d24d465e237966c3f59f47dcac6c70fb0bca3",
+          "version": "1.6.1"
         }
       }
     ]

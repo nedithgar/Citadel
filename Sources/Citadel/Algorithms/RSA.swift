@@ -6,8 +6,75 @@ import CCryptoBoringSSL
 import Foundation
 import Crypto
 
+/// Errors that can occur during RSA operations
+public enum RSAError: LocalizedError {
+    case messageRepresentativeOutOfRange
+    case message(String)
+    
+    public init(message: String) {
+        self = .message(message)
+    }
+    
+    public var errorDescription: String? {
+        switch self {
+        case .messageRepresentativeOutOfRange:
+            return "Message representative out of range"
+        case .message(let msg):
+            return msg
+        }
+    }
+}
+
 extension Insecure {
-    public enum RSA {}
+    public enum RSA {
+        /// Supported RSA signature hash algorithms
+        public enum SignatureHashAlgorithm: String {
+            case sha1 = "ssh-rsa"
+            case sha256 = "rsa-sha2-256"
+            case sha512 = "rsa-sha2-512"
+            
+            // Certificate variants
+            case sha1Cert = "ssh-rsa-cert-v01@openssh.com"
+            case sha256Cert = "rsa-sha2-256-cert-v01@openssh.com"
+            case sha512Cert = "rsa-sha2-512-cert-v01@openssh.com"
+            
+            /// Get the corresponding NID for BoringSSL
+            public var nid: Int32 {
+                switch self {
+                case .sha1, .sha1Cert:
+                    return NID_sha1
+                case .sha256, .sha256Cert:
+                    return NID_sha256
+                case .sha512, .sha512Cert:
+                    return NID_sha512
+                }
+            }
+            
+            /// Whether this algorithm represents a certificate
+            public var isCertificate: Bool {
+                switch self {
+                case .sha1Cert, .sha256Cert, .sha512Cert:
+                    return true
+                default:
+                    return false
+                }
+            }
+            
+            /// Get the base signature algorithm (non-certificate version)
+            public var baseAlgorithm: SignatureHashAlgorithm {
+                switch self {
+                case .sha1Cert:
+                    return .sha1
+                case .sha256Cert:
+                    return .sha256
+                case .sha512Cert:
+                    return .sha512
+                default:
+                    return self
+                }
+            }
+        }
+    }
 }
 
 extension Insecure.RSA {
@@ -73,17 +140,34 @@ extension Insecure.RSA {
                 return false
             }
             
-            var clientSignature = [UInt8](repeating: 0, count: 20)
-            let digest = Array(digest)
-            CCryptoBoringSSL_SHA1(digest, digest.count, &clientSignature)
+            // Hash the message based on the signature algorithm
+            let messageData = Array(digest)
+            let hashedMessage: [UInt8]
+            let hashLength: Int
             
-            let signature = Array(signature.rawRepresentation)
+            switch signature.algorithm {
+            case .sha1, .sha1Cert:
+                var hash = [UInt8](repeating: 0, count: 20)
+                CCryptoBoringSSL_SHA1(messageData, messageData.count, &hash)
+                hashedMessage = hash
+                hashLength = 20
+            case .sha256, .sha256Cert:
+                let hash = SHA256.hash(data: digest)
+                hashedMessage = Array(hash)
+                hashLength = 32
+            case .sha512, .sha512Cert:
+                let hash = SHA512.hash(data: digest)
+                hashedMessage = Array(hash)
+                hashLength = 64
+            }
+            
+            let signatureBytes = Array(signature.rawRepresentation)
             return CCryptoBoringSSL_RSA_verify(
-                NID_sha1,
-                clientSignature,
-                20,
-                signature,
-                signature.count,
+                signature.algorithm.nid,
+                hashedMessage,
+                hashLength,
+                signatureBytes,
+                signatureBytes.count,
                 context
             ) == 1
         }
@@ -104,11 +188,11 @@ extension Insecure.RSA {
             return writtenBytes
         }
         
-        static func read(consuming buffer: inout ByteBuffer) throws -> Insecure.RSA.PublicKey {
+        static func read(consuming buffer: inout ByteBuffer) throws -> PublicKey {
             try read(from: &buffer)
         }
         
-        public static func read(from buffer: inout ByteBuffer) throws -> Insecure.RSA.PublicKey {
+        public static func read(from buffer: inout ByteBuffer) throws -> PublicKey {
             guard
                 var publicExponent = buffer.readSSHBuffer(),
                 var modulus = buffer.readSSHBuffer()
@@ -118,7 +202,7 @@ extension Insecure.RSA {
             
             let publicExponentBytes = publicExponent.readBytes(length: publicExponent.readableBytes)!
             let modulusBytes = modulus.readBytes(length: modulus.readableBytes)!
-            return .init(
+            return PublicKey(
                 publicExponent: CCryptoBoringSSL_BN_bin2bn(publicExponentBytes, publicExponentBytes.count, nil),
                 modulus: CCryptoBoringSSL_BN_bin2bn(modulusBytes, modulusBytes.count, nil)
             )
@@ -141,9 +225,11 @@ extension Insecure.RSA {
         public static let signaturePrefix = "ssh-rsa"
         
         public let rawRepresentation: Data
+        public let algorithm: SignatureHashAlgorithm
         
-        public init<D>(rawRepresentation: D) where D : DataProtocol {
+        public init<D>(rawRepresentation: D, algorithm: SignatureHashAlgorithm = .sha1) where D : DataProtocol {
             self.rawRepresentation = Data(rawRepresentation)
+            self.algorithm = algorithm
         }
         
         public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
@@ -151,65 +237,171 @@ extension Insecure.RSA {
         }
         
         public func write(to buffer: inout ByteBuffer) -> Int {
-            // For SSH-RSA, the key format is the signature without lengths or paddings
-            return buffer.writeSSHString(rawRepresentation)
+            var writtenBytes = 0
+            // Write the algorithm identifier first
+            writtenBytes += buffer.writeSSHString(algorithm.rawValue.utf8)
+            // Then write the signature bytes
+            writtenBytes += buffer.writeSSHString(rawRepresentation)
+            return writtenBytes
         }
         
         public static func read(from buffer: inout ByteBuffer) throws -> Signature {
-            guard let buffer = buffer.readSSHBuffer() else {
+            // Read the algorithm identifier
+            guard let algorithmString = buffer.readSSHString() else {
+                throw RSAError(message: "Missing signature algorithm identifier")
+            }
+            
+            guard let algorithm = SignatureHashAlgorithm(rawValue: algorithmString) else {
+                throw RSAError(message: "Unsupported signature algorithm: \(algorithmString)")
+            }
+            
+            // Read the signature data
+            guard let signatureData = buffer.readSSHBuffer() else {
                 throw RSAError(message: "Invalid signature format")
             }
             
-            return Signature(rawRepresentation: buffer.getData(at: 0, length: buffer.readableBytes)!)
+            return Signature(
+                rawRepresentation: signatureData.getData(at: 0, length: signatureData.readableBytes)!,
+                algorithm: algorithm
+            )
         }
     }
     
     public final class PrivateKey: NIOSSHPrivateKeyProtocol {
         public static let keyPrefix = "ssh-rsa"
         
-        // Private Exponent
+        // Private Exponent d
         internal let privateExponent: UnsafeMutablePointer<BIGNUM>
         
-        // Public Exponent e
+        // Prime factors p and q
+        internal let p: UnsafeMutablePointer<BIGNUM>?
+        internal let q: UnsafeMutablePointer<BIGNUM>?
+        
+        // iqmp = q^-1 mod p
+        internal let iqmp: UnsafeMutablePointer<BIGNUM>?
+        
+        // Public key components
         internal let _publicKey: PublicKey
         
         public var publicKey: NIOSSHPublicKeyProtocol {
             _publicKey
         }
         
-        public init(privateExponent: UnsafeMutablePointer<BIGNUM>, publicExponent: UnsafeMutablePointer<BIGNUM>, modulus: UnsafeMutablePointer<BIGNUM>) {
+        public init(privateExponent: UnsafeMutablePointer<BIGNUM>, publicExponent: UnsafeMutablePointer<BIGNUM>, modulus: UnsafeMutablePointer<BIGNUM>, p: UnsafeMutablePointer<BIGNUM>? = nil, q: UnsafeMutablePointer<BIGNUM>? = nil, iqmp: UnsafeMutablePointer<BIGNUM>? = nil) {
             self.privateExponent = privateExponent
+            self.p = p
+            self.q = q
+            self.iqmp = iqmp
             self._publicKey = PublicKey(publicExponent: publicExponent, modulus: modulus)
         }
         
         deinit {
             CCryptoBoringSSL_BN_free(privateExponent)
+            if let p = p { CCryptoBoringSSL_BN_free(p) }
+            if let q = q { CCryptoBoringSSL_BN_free(q) }
+            if let iqmp = iqmp { CCryptoBoringSSL_BN_free(iqmp) }
         }
         
-        public init(bits: Int = 2047, publicExponent e: BigUInt = 65537) {
-            let privateKey = CCryptoBoringSSL_BN_new()!
-            let publicKey = CCryptoBoringSSL_BN_new()!
-            let group = CCryptoBoringSSL_BN_bin2bn(dh14p, dh14p.count, nil)!
-            let generator = CCryptoBoringSSL_BN_bin2bn(generator2, generator2.count, nil)!
-            let bignumContext = CCryptoBoringSSL_BN_CTX_new()
+        public init(bits: Int = 2048, publicExponent e: BigUInt = 65537) {
+            // Generate prime numbers p and q
+            let p = CCryptoBoringSSL_BN_new()!
+            let q = CCryptoBoringSSL_BN_new()!
+            let n = CCryptoBoringSSL_BN_new()!
+            let d = CCryptoBoringSSL_BN_new()!
+            let phi = CCryptoBoringSSL_BN_new()!
+            let p1 = CCryptoBoringSSL_BN_new()!
+            let q1 = CCryptoBoringSSL_BN_new()!
+            let iqmp = CCryptoBoringSSL_BN_new()!
+            let ctx = CCryptoBoringSSL_BN_CTX_new()!
             
-            CCryptoBoringSSL_BN_rand(privateKey, 256 * 8 - 1, 0, /*-1*/BN_RAND_BOTTOM_ANY)
-            CCryptoBoringSSL_BN_mod_exp(publicKey, generator, privateKey, group, bignumContext)
+            defer {
+                CCryptoBoringSSL_BN_free(phi)
+                CCryptoBoringSSL_BN_free(p1)
+                CCryptoBoringSSL_BN_free(q1)
+                CCryptoBoringSSL_BN_CTX_free(ctx)
+            }
+            
+            // Convert public exponent to BIGNUM
             let eBytes = Array(e.serialize())
-            let e = CCryptoBoringSSL_BN_bin2bn(eBytes, eBytes.count, nil)!
+            let eBN = CCryptoBoringSSL_BN_bin2bn(eBytes, eBytes.count, nil)!
             
-            CCryptoBoringSSL_BN_CTX_free(bignumContext)
-            CCryptoBoringSSL_BN_free(generator)
-            CCryptoBoringSSL_BN_free(group)
+            // Generate two prime numbers of half the key size
+            let primeSize = bits / 2
+            guard CCryptoBoringSSL_BN_generate_prime_ex(p, Int32(primeSize), 0, nil, nil, nil) == 1,
+                  CCryptoBoringSSL_BN_generate_prime_ex(q, Int32(primeSize), 0, nil, nil, nil) == 1 else {
+                fatalError("Failed to generate prime numbers")
+            }
             
-            self.privateExponent = privateKey
+            // Calculate n = p * q
+            guard CCryptoBoringSSL_BN_mul(n, p, q, ctx) == 1 else {
+                fatalError("Failed to calculate modulus")
+            }
+            
+            // Calculate phi(n) = (p-1) * (q-1)
+            guard CCryptoBoringSSL_BN_sub(p1, p, CCryptoBoringSSL_BN_value_one()) == 1,
+                  CCryptoBoringSSL_BN_sub(q1, q, CCryptoBoringSSL_BN_value_one()) == 1,
+                  CCryptoBoringSSL_BN_mul(phi, p1, q1, ctx) == 1 else {
+                fatalError("Failed to calculate phi")
+            }
+            
+            // Calculate d = e^-1 mod phi(n)
+            guard CCryptoBoringSSL_BN_mod_inverse(d, eBN, phi, ctx) != nil else {
+                fatalError("Failed to calculate private exponent")
+            }
+            
+            // Calculate iqmp = q^-1 mod p
+            guard CCryptoBoringSSL_BN_mod_inverse(iqmp, q, p, ctx) != nil else {
+                fatalError("Failed to calculate iqmp")
+            }
+            
+            self.privateExponent = d
+            self.p = p
+            self.q = q
+            self.iqmp = iqmp
             self._publicKey = .init(
-                publicExponent: e,
-                modulus: publicKey
+                publicExponent: eBN,
+                modulus: n
             )
         }
         
-        public func signature<D: DataProtocol>(for message: D) throws -> Signature {
+        /// Calculates CRT parameters dmp1 and dmq1 from d, p, q
+        /// - Returns: Tuple of (dmp1, dmq1) where dmp1 = d mod (p-1) and dmq1 = d mod (q-1)
+        func calculateCRTParams() -> (dmp1: UnsafeMutablePointer<BIGNUM>?, dmq1: UnsafeMutablePointer<BIGNUM>?) {
+            guard let p = p, let q = q else { return (nil, nil) }
+            
+            let ctx = CCryptoBoringSSL_BN_CTX_new()!
+            defer { CCryptoBoringSSL_BN_CTX_free(ctx) }
+            
+            let p1 = CCryptoBoringSSL_BN_new()!
+            let q1 = CCryptoBoringSSL_BN_new()!
+            let dmp1 = CCryptoBoringSSL_BN_new()!
+            let dmq1 = CCryptoBoringSSL_BN_new()!
+            
+            defer {
+                CCryptoBoringSSL_BN_free(p1)
+                CCryptoBoringSSL_BN_free(q1)
+            }
+            
+            // Calculate p-1 and q-1
+            if CCryptoBoringSSL_BN_sub(p1, p, CCryptoBoringSSL_BN_value_one()) != 1 ||
+               CCryptoBoringSSL_BN_sub(q1, q, CCryptoBoringSSL_BN_value_one()) != 1 {
+                CCryptoBoringSSL_BN_free(dmp1)
+                CCryptoBoringSSL_BN_free(dmq1)
+                return (nil, nil)
+            }
+            
+            // Calculate dmp1 = d mod (p-1) and dmq1 = d mod (q-1)
+            if CCryptoBoringSSL_BN_nnmod(dmp1, privateExponent, p1, ctx) != 1 ||
+               CCryptoBoringSSL_BN_nnmod(dmq1, privateExponent, q1, ctx) != 1 {
+                CCryptoBoringSSL_BN_free(dmp1)
+                CCryptoBoringSSL_BN_free(dmq1)
+                return (nil, nil)
+            }
+            
+            return (dmp1, dmq1)
+        }
+        
+        public func signature<D: DataProtocol>(for message: D, algorithm: SignatureHashAlgorithm = .sha1) throws -> Signature {
             let context = CCryptoBoringSSL_RSA_new()
             defer { CCryptoBoringSSL_RSA_free(context) }
 
@@ -230,14 +422,42 @@ extension Insecure.RSA {
                 throw CitadelError.signingError
             }
             
-            let hash = Array(Insecure.SHA1.hash(data: message))
+            // Set factors and CRT params if available for performance
+            if let p = p, let q = q {
+                let pCopy = CCryptoBoringSSL_BN_new()!
+                let qCopy = CCryptoBoringSSL_BN_new()!
+                CCryptoBoringSSL_BN_copy(pCopy, p)
+                CCryptoBoringSSL_BN_copy(qCopy, q)
+                CCryptoBoringSSL_RSA_set0_factors(context, pCopy, qCopy)
+                
+                if let iqmp = iqmp {
+                    let (dmp1, dmq1) = calculateCRTParams()
+                    if let dmp1 = dmp1, let dmq1 = dmq1 {
+                        let iqmpCopy = CCryptoBoringSSL_BN_new()!
+                        CCryptoBoringSSL_BN_copy(iqmpCopy, iqmp)
+                        CCryptoBoringSSL_RSA_set0_crt_params(context, dmp1, dmq1, iqmpCopy)
+                    }
+                }
+            }
+            
+            // Hash the message based on the selected algorithm
+            let hashedMessage: [UInt8]
+            switch algorithm {
+            case .sha1, .sha1Cert:
+                hashedMessage = Array(Insecure.SHA1.hash(data: message))
+            case .sha256, .sha256Cert:
+                hashedMessage = Array(SHA256.hash(data: message))
+            case .sha512, .sha512Cert:
+                hashedMessage = Array(SHA512.hash(data: message))
+            }
+            
             let out = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
             defer { out.deallocate() }
             var outLength: UInt32 = 4096
             let result = CCryptoBoringSSL_RSA_sign(
-                NID_sha1,
-                hash,
-                Int(hash.count),
+                algorithm.nid,
+                hashedMessage,
+                Int(hashedMessage.count),
                 out,
                 &outLength,
                 context
@@ -247,7 +467,7 @@ extension Insecure.RSA {
                 throw CitadelError.signingError
             }
             
-            return Signature(rawRepresentation: Data(bytes: out, count: Int(outLength)))
+            return Signature(rawRepresentation: Data(bytes: out, count: Int(outLength)), algorithm: algorithm)
         }
         
         public func signature<D>(for data: D) throws -> NIOSSHSignatureProtocol where D : DataProtocol {
@@ -293,35 +513,6 @@ extension Insecure.RSA {
     }
 }
 
-public struct RSAError: Error {
-    let message: String
-    
-    static let messageRepresentativeOutOfRange = RSAError(message: "message representative out of range")
-    static let ciphertextRepresentativeOutOfRange = RSAError(message: "ciphertext representative out of range")
-    static let signatureRepresentativeOutOfRange = RSAError(message: "signature representative out of range")
-    static let invalidPem = RSAError(message: "invalid PEM")
-    static let pkcs1Error = RSAError(message: "PKCS1Error")
-}
-
-extension BigUInt {
-    public static func randomPrime(bits: Int) -> BigUInt {
-        while true {
-            var privateExponent = BigUInt.randomInteger(withExactWidth: bits)
-            privateExponent |= 1
-            
-            if privateExponent.isPrime() {
-                return privateExponent
-            }
-        }
-    }
-    
-    fileprivate init(boringSSL bignum: UnsafeMutablePointer<BIGNUM>) {
-        var data = [UInt8](repeating: 0, count: Int(CCryptoBoringSSL_BN_num_bytes(bignum)))
-        CCryptoBoringSSL_BN_bn2bin(bignum, &data)
-        self.init(Data(data))
-    }
-}
-
 extension BigUInt {
     public static let diffieHellmanGroup14 = BigUInt(Data([
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -357,6 +548,304 @@ extension BigUInt {
         0x15, 0x72, 0x8E, 0x5A, 0x8A, 0xAC, 0xAA, 0x68,
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
     ] as [UInt8]))
+}
+
+// MARK: - PEM/DER Support for RSA Keys
+
+extension Insecure.RSA.PublicKey {
+    /// The Subject Public Key Info (SPKI) DER representation of the public key
+    public var spkiDERRepresentation: Data {
+        get throws {
+            // Create EVP_PKEY
+            guard let evpKey = CCryptoBoringSSL_EVP_PKEY_new() else {
+                throw RSAError(message: "Failed to create EVP_PKEY")
+            }
+            defer { CCryptoBoringSSL_EVP_PKEY_free(evpKey) }
+            
+            // Create RSA structure
+            guard let rsa = CCryptoBoringSSL_RSA_new() else {
+                throw RSAError(message: "Failed to create RSA structure")
+            }
+            defer { CCryptoBoringSSL_RSA_free(rsa) }
+            
+            // Copy BIGNUMs for RSA structure (RSA_set0_key takes ownership)
+            let nCopy = CCryptoBoringSSL_BN_dup(modulus)
+            let eCopy = CCryptoBoringSSL_BN_dup(publicExponent)
+            
+            guard CCryptoBoringSSL_RSA_set0_key(rsa, nCopy, eCopy, nil) == 1 else {
+                CCryptoBoringSSL_BN_free(nCopy)
+                CCryptoBoringSSL_BN_free(eCopy)
+                throw RSAError(message: "Failed to set RSA public key components")
+            }
+            
+            // Assign RSA to EVP_PKEY
+            guard CCryptoBoringSSL_EVP_PKEY_assign_RSA(evpKey, rsa) == 1 else {
+                throw RSAError(message: "Failed to assign RSA to EVP_PKEY")
+            }
+            
+            // Increment reference count since EVP_PKEY_assign_RSA doesn't take ownership
+            CCryptoBoringSSL_RSA_up_ref(rsa)
+            
+            // Encode to DER
+            let bio = CCryptoBoringSSL_BIO_new(CCryptoBoringSSL_BIO_s_mem())
+            defer { CCryptoBoringSSL_BIO_free(bio) }
+            
+            guard CCryptoBoringSSL_i2d_PUBKEY_bio(bio, evpKey) == 1 else {
+                throw RSAError(message: "Failed to write public key to BIO")
+            }
+            
+            // Read the data from BIO
+            var dataPointer: UnsafeMutablePointer<CChar>?
+            let length = CCryptoBoringSSL_BIO_get_mem_data(bio, &dataPointer)
+            
+            guard length > 0, let dataPointer = dataPointer else {
+                throw RSAError(message: "Failed to get public key data from BIO")
+            }
+            
+            return Data(bytes: dataPointer, count: Int(length))
+        }
+    }
+    
+    /// The PEM representation of the public key
+    public var pemRepresentation: String {
+        get throws {
+            let derData = try spkiDERRepresentation
+            let base64 = derData.base64EncodedString()
+            
+            // Format base64 with 64-character lines
+            var formattedBase64 = ""
+            var index = base64.startIndex
+            while index < base64.endIndex {
+                let endIndex = base64.index(index, offsetBy: 64, limitedBy: base64.endIndex) ?? base64.endIndex
+                formattedBase64 += base64[index..<endIndex]
+                if endIndex < base64.endIndex {
+                    formattedBase64 += "\n"
+                }
+                index = endIndex
+            }
+            
+            return "-----BEGIN PUBLIC KEY-----\n\(formattedBase64)\n-----END PUBLIC KEY-----"
+        }
+    }
+}
+
+extension Insecure.RSA.PrivateKey {
+    /// The PEM representation of the private key
+    public var pemRepresentation: String {
+        get throws {
+            // Create RSA structure
+            guard let rsa = CCryptoBoringSSL_RSA_new() else {
+                throw RSAError(message: "Failed to create RSA structure")
+            }
+            defer { CCryptoBoringSSL_RSA_free(rsa) }
+            
+            // Copy BIGNUMs for RSA structure (RSA_set0_key takes ownership)
+            let nCopy = CCryptoBoringSSL_BN_dup(_publicKey.modulus)
+            let eCopy = CCryptoBoringSSL_BN_dup(_publicKey.publicExponent)
+            let dCopy = CCryptoBoringSSL_BN_dup(privateExponent)
+            
+            guard CCryptoBoringSSL_RSA_set0_key(rsa, nCopy, eCopy, dCopy) == 1 else {
+                CCryptoBoringSSL_BN_free(nCopy)
+                CCryptoBoringSSL_BN_free(eCopy)
+                CCryptoBoringSSL_BN_free(dCopy)
+                throw RSAError(message: "Failed to set RSA key components")
+            }
+            
+            // Set factors if available
+            if let p = p, let q = q {
+                let pCopy = CCryptoBoringSSL_BN_dup(p)
+                let qCopy = CCryptoBoringSSL_BN_dup(q)
+                CCryptoBoringSSL_RSA_set0_factors(rsa, pCopy, qCopy)
+                
+                // Set CRT params if available
+                if let iqmp = iqmp {
+                    let (dmp1, dmq1) = calculateCRTParams()
+                    if let dmp1 = dmp1, let dmq1 = dmq1 {
+                        let iqmpCopy = CCryptoBoringSSL_BN_dup(iqmp)
+                        CCryptoBoringSSL_RSA_set0_crt_params(rsa, dmp1, dmq1, iqmpCopy)
+                    }
+                }
+            }
+            
+            // Write to BIO
+            guard let bio = CCryptoBoringSSL_BIO_new(CCryptoBoringSSL_BIO_s_mem()) else {
+                throw RSAError(message: "Failed to create BIO")
+            }
+            defer { CCryptoBoringSSL_BIO_free(bio) }
+            
+            guard CCryptoBoringSSL_PEM_write_bio_RSAPrivateKey(bio, rsa, nil, nil, 0, nil, nil) == 1 else {
+                throw RSAError(message: "Failed to write RSA private key to PEM")
+            }
+            
+            // Read PEM from BIO
+            var ptr: UnsafeMutablePointer<CChar>?
+            let length = CCryptoBoringSSL_BIO_get_mem_data(bio, &ptr)
+            guard length > 0, let ptr = ptr else {
+                throw RSAError(message: "Failed to get PEM data from BIO")
+            }
+            
+            return String(cString: ptr)
+        }
+    }
+    
+    /// Initialize from PEM representation
+    public convenience init(pemRepresentation: String) throws {
+        // Use BoringSSL to parse the PEM
+        let pemData = Data(pemRepresentation.utf8)
+        let bio = pemData.withUnsafeBytes { bytes in
+            CCryptoBoringSSL_BIO_new_mem_buf(bytes.baseAddress, Int(bytes.count))
+        }
+        defer { CCryptoBoringSSL_BIO_free(bio) }
+        
+        guard let rsa = CCryptoBoringSSL_PEM_read_bio_RSAPrivateKey(bio, nil, nil, nil) else {
+            throw RSAError(message: "Failed to parse PEM-encoded RSA private key")
+        }
+        defer { CCryptoBoringSSL_RSA_free(rsa) }
+        
+        // Extract components from the RSA structure
+        var n: UnsafePointer<BIGNUM>?
+        var e: UnsafePointer<BIGNUM>?
+        var d: UnsafePointer<BIGNUM>?
+        var p: UnsafePointer<BIGNUM>?
+        var q: UnsafePointer<BIGNUM>?
+        var dmp1: UnsafePointer<BIGNUM>?
+        var dmq1: UnsafePointer<BIGNUM>?
+        var iqmp: UnsafePointer<BIGNUM>?
+        
+        CCryptoBoringSSL_RSA_get0_key(rsa, &n, &e, &d)
+        CCryptoBoringSSL_RSA_get0_factors(rsa, &p, &q)
+        CCryptoBoringSSL_RSA_get0_crt_params(rsa, &dmp1, &dmq1, &iqmp)
+        
+        // Create copies of the BIGNUMs
+        let modulus = CCryptoBoringSSL_BN_dup(n)!
+        let publicExponent = CCryptoBoringSSL_BN_dup(e)!
+        let privateExponent = CCryptoBoringSSL_BN_dup(d)!
+        let pCopy = p != nil ? CCryptoBoringSSL_BN_dup(p) : nil
+        let qCopy = q != nil ? CCryptoBoringSSL_BN_dup(q) : nil
+        let iqmpCopy = iqmp != nil ? CCryptoBoringSSL_BN_dup(iqmp) : nil
+        
+        self.init(
+            privateExponent: privateExponent,
+            publicExponent: publicExponent,
+            modulus: modulus,
+            p: pCopy,
+            q: qCopy,
+            iqmp: iqmpCopy
+        )
+    }
+    
+    /// The DER representation of the private key
+    public var derRepresentation: Data {
+        get throws {
+            // Create RSA structure
+            guard let rsa = CCryptoBoringSSL_RSA_new() else {
+                throw RSAError(message: "Failed to create RSA structure")
+            }
+            defer { CCryptoBoringSSL_RSA_free(rsa) }
+            
+            // Copy BIGNUMs for RSA structure (RSA_set0_key takes ownership)
+            let nCopy = CCryptoBoringSSL_BN_dup(_publicKey.modulus)
+            let eCopy = CCryptoBoringSSL_BN_dup(_publicKey.publicExponent)
+            let dCopy = CCryptoBoringSSL_BN_dup(privateExponent)
+            
+            guard CCryptoBoringSSL_RSA_set0_key(rsa, nCopy, eCopy, dCopy) == 1 else {
+                CCryptoBoringSSL_BN_free(nCopy)
+                CCryptoBoringSSL_BN_free(eCopy)
+                CCryptoBoringSSL_BN_free(dCopy)
+                throw RSAError(message: "Failed to set RSA key components")
+            }
+            
+            // Set factors if available
+            if let p = p, let q = q {
+                let pCopy = CCryptoBoringSSL_BN_dup(p)
+                let qCopy = CCryptoBoringSSL_BN_dup(q)
+                CCryptoBoringSSL_RSA_set0_factors(rsa, pCopy, qCopy)
+                
+                // Set CRT params if available
+                if let iqmp = iqmp {
+                    let (dmp1, dmq1) = calculateCRTParams()
+                    if let dmp1 = dmp1, let dmq1 = dmq1 {
+                        let iqmpCopy = CCryptoBoringSSL_BN_dup(iqmp)
+                        CCryptoBoringSSL_RSA_set0_crt_params(rsa, dmp1, dmq1, iqmpCopy)
+                    }
+                }
+            }
+            
+            // Write to BIO
+            guard let bio = CCryptoBoringSSL_BIO_new(CCryptoBoringSSL_BIO_s_mem()) else {
+                throw RSAError(message: "Failed to create BIO")
+            }
+            defer { CCryptoBoringSSL_BIO_free(bio) }
+            
+            guard CCryptoBoringSSL_i2d_RSAPrivateKey_bio(bio, rsa) == 1 else {
+                throw RSAError(message: "Failed to write RSA private key to DER")
+            }
+            
+            // Read DER from BIO
+            var ptr: UnsafeMutablePointer<CChar>?
+            let length = CCryptoBoringSSL_BIO_get_mem_data(bio, &ptr)
+            guard length > 0, let ptr = ptr else {
+                throw RSAError(message: "Failed to get DER data from BIO")
+            }
+            
+            return Data(bytes: ptr, count: Int(length))
+        }
+    }
+    
+    /// Initialize from DER representation
+    public convenience init(derRepresentation: Data) throws {
+        // Use BoringSSL to parse the DER
+        let bio = derRepresentation.withUnsafeBytes { bytes in
+            CCryptoBoringSSL_BIO_new_mem_buf(bytes.baseAddress, Int(bytes.count))
+        }
+        defer { CCryptoBoringSSL_BIO_free(bio) }
+        
+        guard let rsa = CCryptoBoringSSL_d2i_RSAPrivateKey_bio(bio, nil) else {
+            throw RSAError(message: "Failed to parse DER-encoded RSA private key")
+        }
+        defer { CCryptoBoringSSL_RSA_free(rsa) }
+        
+        // Extract components from the RSA structure
+        var n: UnsafePointer<BIGNUM>?
+        var e: UnsafePointer<BIGNUM>?
+        var d: UnsafePointer<BIGNUM>?
+        var p: UnsafePointer<BIGNUM>?
+        var q: UnsafePointer<BIGNUM>?
+        var dmp1: UnsafePointer<BIGNUM>?
+        var dmq1: UnsafePointer<BIGNUM>?
+        var iqmp: UnsafePointer<BIGNUM>?
+        
+        CCryptoBoringSSL_RSA_get0_key(rsa, &n, &e, &d)
+        CCryptoBoringSSL_RSA_get0_factors(rsa, &p, &q)
+        CCryptoBoringSSL_RSA_get0_crt_params(rsa, &dmp1, &dmq1, &iqmp)
+        
+        // Create copies of the BIGNUMs
+        let modulus = CCryptoBoringSSL_BN_dup(n)!
+        let publicExponent = CCryptoBoringSSL_BN_dup(e)!
+        let privateExponent = CCryptoBoringSSL_BN_dup(d)!
+        let pCopy = p != nil ? CCryptoBoringSSL_BN_dup(p) : nil
+        let qCopy = q != nil ? CCryptoBoringSSL_BN_dup(q) : nil
+        let iqmpCopy = iqmp != nil ? CCryptoBoringSSL_BN_dup(iqmp) : nil
+        
+        self.init(
+            privateExponent: privateExponent,
+            publicExponent: publicExponent,
+            modulus: modulus,
+            p: pCopy,
+            q: qCopy,
+            iqmp: iqmpCopy
+        )
+    }
+}
+
+// Helper extension to convert BIGNUM to Data
+private extension Data {
+    init(bignum: UnsafeMutablePointer<BIGNUM>) {
+        let size = Int(CCryptoBoringSSL_BN_num_bytes(bignum))
+        var bytes = [UInt8](repeating: 0, count: size)
+        CCryptoBoringSSL_BN_bn2bin(bignum, &bytes)
+        self = Data(bytes)
+    }
 }
 
 extension ByteBuffer {

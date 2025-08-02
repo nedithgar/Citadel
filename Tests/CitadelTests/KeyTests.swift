@@ -120,7 +120,7 @@ final class KeyTests: XCTestCase {
         let privateKey = try Curve25519.Signing.PrivateKey(sshEd25519: key)
         XCTAssertNotNil(privateKey)
         
-        let key2 = privateKey.makeSSHRepresentation(comment: "jaap@Jaaps-MacBook-Pro.local")
+        let key2 = try privateKey.makeSSHRepresentation(comment: "jaap@Jaaps-MacBook-Pro.local")
         let privateKey2 = try Curve25519.Signing.PrivateKey(sshEd25519: key2)
         XCTAssertEqual(privateKey.rawRepresentation, privateKey2.rawRepresentation)
     }
@@ -201,7 +201,11 @@ final class KeyTests: XCTestCase {
     
     func testSSHKeyTypeAllCases() {
         // Ensure all key types are covered
-        let expectedTypes: Set<SSHKeyType> = [.rsa, .ed25519, .ecdsaP256, .ecdsaP384, .ecdsaP521]
+        let expectedTypes: Set<SSHKeyType> = [
+            .rsa, .ed25519, .ecdsaP256, .ecdsaP384, .ecdsaP521,
+            .rsaCert, .rsaSha256Cert, .rsaSha512Cert, .ed25519Cert,
+            .ecdsaP256Cert, .ecdsaP384Cert, .ecdsaP521Cert
+        ]
         let allCases = Set(SSHKeyType.allCases)
         XCTAssertEqual(allCases, expectedTypes)
         
@@ -328,5 +332,310 @@ final class KeyTests: XCTestCase {
         """
         let ecdsa521KeyType = try SSHKeyDetection.detectPrivateKeyType(from: ecdsa521PrivateKey)
         XCTAssertEqual(ecdsa521KeyType, .ecdsaP521)
+    }
+    
+    func testAllKeyTypesGenerateSSHRepresentation() throws {
+        let testData = "test".data(using: .utf8)!
+        // Test Ed25519 key generation and export
+        let ed25519Key = Curve25519.Signing.PrivateKey()
+        let ed25519SSH = try ed25519Key.makeSSHRepresentation(comment: "test@ed25519")
+        XCTAssertTrue(ed25519SSH.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        XCTAssertTrue(ed25519SSH.contains("-----END OPENSSH PRIVATE KEY-----"))
+        
+        // Verify we can read it back
+        let ed25519Parsed = try Curve25519.Signing.PrivateKey(sshEd25519: ed25519SSH)
+        XCTAssertEqual(ed25519Key.rawRepresentation, ed25519Parsed.rawRepresentation)
+        
+        // Test ECDSA P-256 key generation and export
+        let p256Key = P256.Signing.PrivateKey()
+        let p256SSH = try p256Key.makeSSHRepresentation(comment: "test@p256")
+        XCTAssertTrue(p256SSH.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        
+        // Verify we can read it back
+        let p256Parsed = try P256.Signing.PrivateKey(sshECDSA: p256SSH)
+        // Check if public keys match
+        XCTAssertEqual(p256Key.publicKey.x963Representation, p256Parsed.publicKey.x963Representation)
+        
+        // Test ECDSA P-384 key generation and export
+        let p384Key = P384.Signing.PrivateKey()
+        let p384SSH = try p384Key.makeSSHRepresentation(comment: "test@p384")
+        XCTAssertTrue(p384SSH.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Verify we can read it back
+        let p384Parsed = try P384.Signing.PrivateKey(sshECDSA: p384SSH)
+        // Check if public keys match
+        XCTAssertEqual(p384Key.publicKey.x963Representation, p384Parsed.publicKey.x963Representation)
+        
+        // Test ECDSA P-521 key generation and export
+        let p521Key = P521.Signing.PrivateKey()
+        let p521SSH = try p521Key.makeSSHRepresentation(comment: "test@p521")
+        XCTAssertTrue(p521SSH.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Verify we can read it back
+        let p521Parsed = try P521.Signing.PrivateKey(sshECDSA: p521SSH)
+        // Check if public keys match
+        XCTAssertEqual(p521Key.publicKey.x963Representation, p521Parsed.publicKey.x963Representation)
+        
+        // Test RSA key generation and export (now with full CRT parameters)
+        let rsaKey = Insecure.RSA.PrivateKey(bits: 2048)
+        let rsaSSH = try rsaKey.makeSSHRepresentation(comment: "test@rsa")
+        XCTAssertTrue(rsaSSH.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Test RSA round-trip - now supported with full parameters
+        XCTAssertNoThrow(try Insecure.RSA.PrivateKey(sshRsa: rsaSSH))
+        
+        // Test RSA with passphrase
+        let rsaEncrypted = try rsaKey.makeSSHRepresentation(
+            comment: "test@rsa-encrypted",
+            passphrase: "test_passphrase_123"
+        )
+        XCTAssertTrue(rsaEncrypted.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Verify encrypted RSA can be decrypted and parsed
+        XCTAssertNoThrow(try Insecure.RSA.PrivateKey(sshRsa: rsaEncrypted, decryptionKey: "test_passphrase_123".data(using: .utf8)))
+        XCTAssertNoThrow(try Insecure.RSA.PrivateKey(sshRsa: rsaSSH))
+    }
+    
+    func testPassphraseEncryptedKeyGeneration() throws {
+        // Test Ed25519 with passphrase
+        let ed25519Key = Curve25519.Signing.PrivateKey()
+        let passphrase = "test-passphrase-123"
+        let ed25519Encrypted = try ed25519Key.makeSSHRepresentation(
+            comment: "encrypted@ed25519",
+            passphrase: passphrase
+        )
+        
+        // Should contain encryption markers in the base64 content, not the PEM wrapper
+        let lines = ed25519Encrypted.split(separator: "\n")
+        if lines.count > 2 {
+            let base64Content = lines[1..<lines.count-1].joined(separator: "")
+            if let decodedData = Data(base64Encoded: base64Content) {
+                // The decoded data starts with openssh-key-v1\0 and contains cipher and kdf strings
+                let decodedString = String(decoding: decodedData, as: UTF8.self)
+                XCTAssertTrue(decodedString.contains("aes256-ctr") || decodedString.contains("aes128-ctr"))
+                XCTAssertTrue(decodedString.contains("bcrypt"))
+            } else {
+                XCTFail("Could not decode base64 content")
+            }
+        }
+        
+        // Verify we can decrypt it
+        let ed25519Decrypted = try Curve25519.Signing.PrivateKey(
+            sshEd25519: ed25519Encrypted,
+            decryptionKey: passphrase.data(using: .utf8)!
+        )
+        XCTAssertEqual(ed25519Key.rawRepresentation, ed25519Decrypted.rawRepresentation)
+        
+        // Test ECDSA P-256 with passphrase and custom cipher
+        let p256Key = P256.Signing.PrivateKey()
+        let p256Encrypted = try p256Key.makeSSHRepresentation(
+            comment: "encrypted@p256",
+            passphrase: passphrase,
+            cipher: "aes128-ctr"
+        )
+        
+        // Check in decoded content
+        let p256Lines = p256Encrypted.split(separator: "\n")
+        if p256Lines.count > 2 {
+            let base64Content = p256Lines[1..<p256Lines.count-1].joined()
+            if let decodedData = Data(base64Encoded: base64Content),
+               let decodedString = String(data: decodedData, encoding: .utf8) {
+                XCTAssertTrue(decodedString.contains("aes128-ctr"))
+            }
+        }
+        
+        // Verify we can decrypt it
+        let p256Decrypted = try P256.Signing.PrivateKey(
+            sshECDSA: p256Encrypted,
+            decryptionKey: passphrase.data(using: .utf8)!
+        )
+        XCTAssertEqual(p256Key.rawRepresentation, p256Decrypted.rawRepresentation)
+    }
+    
+    func testKeyGenerationWithDifferentRounds() throws {
+        let key = P384.Signing.PrivateKey()
+        let passphrase = "test-rounds"
+        
+        // Test with different BCrypt rounds
+        let encrypted8 = try key.makeSSHRepresentation(
+            passphrase: passphrase,
+            rounds: 8
+        )
+        let encrypted16 = try key.makeSSHRepresentation(
+            passphrase: passphrase,
+            rounds: 16
+        )
+        let encrypted12 = try key.makeSSHRepresentation(
+            passphrase: passphrase,
+            rounds: 12
+        )
+        
+        // All should be different due to different salts
+        XCTAssertNotEqual(encrypted8, encrypted16)
+        XCTAssertNotEqual(encrypted8, encrypted12)
+        XCTAssertNotEqual(encrypted16, encrypted12)
+        
+        // But all should decrypt to the same key
+        let decrypted8 = try P384.Signing.PrivateKey(
+            sshECDSA: encrypted8,
+            decryptionKey: passphrase.data(using: .utf8)!
+        )
+        let decrypted16 = try P384.Signing.PrivateKey(
+            sshECDSA: encrypted16,
+            decryptionKey: passphrase.data(using: .utf8)!
+        )
+        XCTAssertEqual(key.rawRepresentation, decrypted8.rawRepresentation)
+        XCTAssertEqual(key.rawRepresentation, decrypted16.rawRepresentation)
+    }
+    
+    func testRSAKeyGenerationWithCRTParameters() throws {
+        // Generate a new RSA key
+        let rsaKey = Insecure.RSA.PrivateKey(bits: 2048)
+        
+        // Export to SSH format
+        let sshKey = try rsaKey.makeSSHRepresentation(comment: "test-rsa-crt")
+        XCTAssertTrue(sshKey.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        XCTAssertTrue(sshKey.contains("-----END OPENSSH PRIVATE KEY-----"))
+        
+        // Parse it back
+        let parsedKey = try Insecure.RSA.PrivateKey(sshRsa: sshKey)
+        
+        // Test with passphrase
+        let encryptedKey = try rsaKey.makeSSHRepresentation(
+            comment: "test-rsa-crt-encrypted",
+            passphrase: "test123",
+            cipher: "aes256-ctr",
+            rounds: 16
+        )
+        XCTAssertTrue(encryptedKey.contains("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        
+        // Parse encrypted key
+        let decryptedKey = try Insecure.RSA.PrivateKey(
+            sshRsa: encryptedKey, 
+            decryptionKey: "test123".data(using: .utf8)
+        )
+        
+        // Both keys should be valid
+        XCTAssertNotNil(parsedKey)
+        XCTAssertNotNil(decryptedKey)
+    }
+    
+    func testRSASignatureWithDifferentHashAlgorithms() throws {
+        // Generate RSA key pair
+        let privateKey = Insecure.RSA.PrivateKey(bits: 2048)
+        let publicKey = privateKey.publicKey as! Insecure.RSA.PublicKey
+        
+        let message = "Hello, RSA with modern hash algorithms!".data(using: .utf8)!
+        
+        // Test SHA1 (legacy)
+        let sha1Signature = try privateKey.signature(for: message, algorithm: .sha1)
+        XCTAssertEqual(sha1Signature.algorithm, .sha1)
+        XCTAssertTrue(publicKey.isValidSignature(sha1Signature, for: message))
+        
+        // Test SHA256
+        let sha256Signature = try privateKey.signature(for: message, algorithm: .sha256)
+        XCTAssertEqual(sha256Signature.algorithm, .sha256)
+        XCTAssertTrue(publicKey.isValidSignature(sha256Signature, for: message))
+        
+        // Test SHA512
+        let sha512Signature = try privateKey.signature(for: message, algorithm: .sha512)
+        XCTAssertEqual(sha512Signature.algorithm, .sha512)
+        XCTAssertTrue(publicKey.isValidSignature(sha512Signature, for: message))
+        
+        // Test cross-validation fails (wrong algorithm)
+        XCTAssertFalse(publicKey.isValidSignature(
+            Insecure.RSA.Signature(rawRepresentation: sha256Signature.rawRepresentation, algorithm: .sha1),
+            for: message
+        ))
+        
+        // Test signature serialization and deserialization
+        var buffer = ByteBuffer()
+        _ = sha256Signature.write(to: &buffer)
+        let deserializedSig = try Insecure.RSA.Signature.read(from: &buffer)
+        XCTAssertEqual(deserializedSig.algorithm, .sha256)
+        XCTAssertEqual(deserializedSig.rawRepresentation, sha256Signature.rawRepresentation)
+        XCTAssertTrue(publicKey.isValidSignature(deserializedSig, for: message))
+    }
+    
+    func testRSACertificateKeyTypes() throws {
+        // Test that certificate key type prefixes are correctly defined
+        // Test that certificate algorithm variants are correctly defined
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha1Cert.rawValue, "ssh-rsa-cert-v01@openssh.com")
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha256Cert.rawValue, "rsa-sha2-256-cert-v01@openssh.com")
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha512Cert.rawValue, "rsa-sha2-512-cert-v01@openssh.com")
+        
+        // Test certificate algorithm enum
+        let sha1Cert = Insecure.RSA.SignatureHashAlgorithm.sha1Cert
+        XCTAssertTrue(sha1Cert.isCertificate)
+        XCTAssertEqual(sha1Cert.baseAlgorithm, .sha1)
+        XCTAssertEqual(sha1Cert.nid, Int32(64)) // NID_sha1
+        
+        let sha256Cert = Insecure.RSA.SignatureHashAlgorithm.sha256Cert
+        XCTAssertTrue(sha256Cert.isCertificate)
+        XCTAssertEqual(sha256Cert.baseAlgorithm, .sha256)
+        XCTAssertEqual(sha256Cert.nid, Int32(672)) // NID_sha256
+        
+        let sha512Cert = Insecure.RSA.SignatureHashAlgorithm.sha512Cert
+        XCTAssertTrue(sha512Cert.isCertificate)
+        XCTAssertEqual(sha512Cert.baseAlgorithm, .sha512)
+        XCTAssertEqual(sha512Cert.nid, Int32(674)) // NID_sha512
+        
+        // Test non-certificate algorithms
+        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha1.isCertificate)
+        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha256.isCertificate)
+        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha512.isCertificate)
+    }
+    
+    func testRSACertificateKeyTypeDetection() throws {
+        // Test public key detection for RSA certificates
+        let rsaCertKey = "ssh-rsa-cert-v01@openssh.com AAAAB3NzaC1yc2EtY2VydC12MDFAb3BlbnNzaC5jb20AAAAgLongBase64DataHere... user@host"
+        let sha256CertKey = "rsa-sha2-256-cert-v01@openssh.com AAAAB3NzaC1yc2EtY2VydC12MDFAb3BlbnNzaC5jb20AAAAgLongBase64DataHere... user@host"
+        let sha512CertKey = "rsa-sha2-512-cert-v01@openssh.com AAAAB3NzaC1yc2EtY2VydC12MDFAb3BlbnNzaC5jb20AAAAgLongBase64DataHere... user@host"
+        
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: rsaCertKey), .rsaCert)
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: sha256CertKey), .rsaSha256Cert)
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: sha512CertKey), .rsaSha512Cert)
+        
+        // Test that descriptions are correct
+        XCTAssertEqual(SSHKeyType.rsaCert.description, "RSA Certificate (SHA-1)")
+        XCTAssertEqual(SSHKeyType.rsaSha256Cert.description, "RSA Certificate (SHA-256)")
+        XCTAssertEqual(SSHKeyType.rsaSha512Cert.description, "RSA Certificate (SHA-512)")
+    }
+    
+    func testRSAPublicKeyBackwardCompatibility() throws {
+        // Test that RSA.PublicKey remains a final class with static publicKeyPrefix
+        let privateKey = Insecure.RSA.PrivateKey(bits: 2048)
+        let publicKey = privateKey.publicKey as! Insecure.RSA.PublicKey
+        
+        // Test that publicKeyPrefix is still accessible as a static property
+        XCTAssertEqual(Insecure.RSA.PublicKey.publicKeyPrefix, "ssh-rsa")
+        
+        // Test that the class still works as before
+        let message = "Test backward compatibility".data(using: .utf8)!
+        let signature = try privateKey.signature(for: message)
+        XCTAssertTrue(publicKey.isValidSignature(signature, for: message))
+        
+        // Test serialization/deserialization
+        var buffer = ByteBuffer()
+        _ = publicKey.write(to: &buffer)
+        let deserializedKey = try Insecure.RSA.PublicKey.read(from: &buffer)
+        XCTAssertNotNil(deserializedKey)
+    }
+    
+    func testECDSACertificateKeyTypeDetection() throws {
+        // Test ECDSA certificate key types
+        let ecdsaP256CertKey = "ecdsa-sha2-nistp256-cert-v01@openssh.com AAAAB3... user@example.com"
+        let ecdsaP384CertKey = "ecdsa-sha2-nistp384-cert-v01@openssh.com AAAAB3... user@example.com"
+        let ecdsaP521CertKey = "ecdsa-sha2-nistp521-cert-v01@openssh.com AAAAB3... user@example.com"
+        
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: ecdsaP256CertKey), .ecdsaP256Cert)
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: ecdsaP384CertKey), .ecdsaP384Cert)
+        XCTAssertEqual(try SSHKeyDetection.detectPublicKeyType(from: ecdsaP521CertKey), .ecdsaP521Cert)
+        
+        // Test descriptions
+        XCTAssertEqual(SSHKeyType.ecdsaP256Cert.description, "ECDSA P-256 Certificate")
+        XCTAssertEqual(SSHKeyType.ecdsaP384Cert.description, "ECDSA P-384 Certificate")
+        XCTAssertEqual(SSHKeyType.ecdsaP521Cert.description, "ECDSA P-521 Certificate")
     }
 }

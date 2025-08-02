@@ -14,6 +14,19 @@ public struct SSHKeyType: RawRepresentable, Equatable, Hashable, CaseIterable, C
         case ecdsaP256  = "ecdsa-sha2-nistp256"
         case ecdsaP384  = "ecdsa-sha2-nistp384"
         case ecdsaP521  = "ecdsa-sha2-nistp521"
+        
+        // RSA certificate types
+        case rsaCert = "ssh-rsa-cert-v01@openssh.com"
+        case rsaSha256Cert = "rsa-sha2-256-cert-v01@openssh.com"
+        case rsaSha512Cert = "rsa-sha2-512-cert-v01@openssh.com"
+        
+        // Ed25519 certificate type
+        case ed25519Cert = "ssh-ed25519-cert-v01@openssh.com"
+        
+        // ECDSA certificate types
+        case ecdsaP256Cert = "ecdsa-sha2-nistp256-cert-v01@openssh.com"
+        case ecdsaP384Cert = "ecdsa-sha2-nistp384-cert-v01@openssh.com"
+        case ecdsaP521Cert = "ecdsa-sha2-nistp521-cert-v01@openssh.com"
     }
     
     // MARK: RawRepresentable
@@ -43,6 +56,13 @@ public struct SSHKeyType: RawRepresentable, Equatable, Hashable, CaseIterable, C
         case .ecdsaP256:  return "ECDSA P-256"
         case .ecdsaP384:  return "ECDSA P-384"
         case .ecdsaP521:  return "ECDSA P-521"
+        case .rsaCert:    return "RSA Certificate (SHA-1)"
+        case .rsaSha256Cert: return "RSA Certificate (SHA-256)"
+        case .rsaSha512Cert: return "RSA Certificate (SHA-512)"
+        case .ed25519Cert: return "Ed25519 Certificate"
+        case .ecdsaP256Cert: return "ECDSA P-256 Certificate"
+        case .ecdsaP384Cert: return "ECDSA P-384 Certificate"
+        case .ecdsaP521Cert: return "ECDSA P-521 Certificate"
         }
     }
     
@@ -52,6 +72,19 @@ public struct SSHKeyType: RawRepresentable, Equatable, Hashable, CaseIterable, C
     public static let ecdsaP256  = SSHKeyType(backing: .ecdsaP256)
     public static let ecdsaP384  = SSHKeyType(backing: .ecdsaP384)
     public static let ecdsaP521  = SSHKeyType(backing: .ecdsaP521)
+    
+    // RSA certificate types
+    public static let rsaCert = SSHKeyType(backing: .rsaCert)
+    public static let rsaSha256Cert = SSHKeyType(backing: .rsaSha256Cert)
+    public static let rsaSha512Cert = SSHKeyType(backing: .rsaSha512Cert)
+    
+    // Ed25519 certificate type
+    public static let ed25519Cert = SSHKeyType(backing: .ed25519Cert)
+    
+    // ECDSA certificate types
+    public static let ecdsaP256Cert = SSHKeyType(backing: .ecdsaP256Cert)
+    public static let ecdsaP384Cert = SSHKeyType(backing: .ecdsaP384Cert)
+    public static let ecdsaP521Cert = SSHKeyType(backing: .ecdsaP521Cert)
 }
 
 

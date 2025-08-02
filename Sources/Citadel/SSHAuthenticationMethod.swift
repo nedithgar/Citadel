@@ -1,6 +1,12 @@
 import NIO
 import NIOSSH
 import Crypto
+import _CryptoExtras
+
+/// Errors that can occur during SSH authentication
+public enum SSHAuthenticationError: Error {
+    case certificateValidationFailed(Error)
+}
 
 /// Represents an authentication method.
 public final class SSHAuthenticationMethod: NIOSSHClientUserAuthenticationDelegate {
@@ -75,9 +81,11 @@ public final class SSHAuthenticationMethod: NIOSSHClientUserAuthenticationDelega
         return SSHAuthenticationMethod(username: username, offer: .privateKey(.init(privateKey: .init(p521Key: privateKey))))
     }
     
+    
     public static func custom(_ auth: NIOSSHClientUserAuthenticationDelegate) -> SSHAuthenticationMethod {
         return SSHAuthenticationMethod(custom: auth)
     }
+    
     
     public func nextAuthenticationType(
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
@@ -118,3 +126,4 @@ public final class SSHAuthenticationMethod: NIOSSHClientUserAuthenticationDelega
         }
     }
 }
+

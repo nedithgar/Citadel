@@ -21,6 +21,63 @@ let settings = SSHClientSettings(
 let client = try await SSHClient.connect(to: settings)
 ```
 
+### Authentication Methods
+
+Citadel supports multiple authentication methods:
+
+#### Password Authentication
+
+```swift
+let settings = SSHClientSettings(
+    host: "example.com",
+    authenticationMethod: { .passwordBased(username: "user", password: "pass") },
+    hostKeyValidator: .acceptAnything()
+)
+```
+
+#### Public Key Authentication
+
+```swift
+let privateKey = try Curve25519.Signing.PrivateKey(
+    rawRepresentation: privateKeyData
+)
+let settings = SSHClientSettings(
+    host: "example.com", 
+    authenticationMethod: { .ed25519(username: "user", privateKey: privateKey) },
+    hostKeyValidator: .acceptAnything()
+)
+```
+
+#### Certificate Authentication
+
+Citadel supports SSH certificate authentication for enhanced security:
+
+```swift
+// Load private key and certificate
+let privateKey = try Curve25519.Signing.PrivateKey(
+    rawRepresentation: privateKeyData
+)
+let certificate = try Ed25519.CertificatePublicKey(
+    certificateData: certificateData
+)
+
+// Use certificate authentication
+let settings = SSHClientSettings(
+    host: "example.com",
+    authenticationMethod: { 
+        .ed25519Certificate(username: "user", privateKey: privateKey, certificate: certificate)
+    },
+    hostKeyValidator: .acceptAnything()
+)
+```
+
+Supported certificate types:
+- ✅ Ed25519 certificates (full authentication support)
+- ✅ RSA certificates (parsing only, no NIOSSH authentication support) 
+- ✅ ECDSA certificates (P256, P384, P521 - full authentication support)
+
+For more details on certificate authentication, see the [Certificate Authentication Documentation](Documentation/CertificateAuthentication.md).
+
 Using that client, we support a couple types of operations:
 
 ### Executing Commands
@@ -323,7 +380,6 @@ When you implement SFTP in Citadel, you're responsible for taking care of logist
 ## Helpers
 
 The most important helper most people need is OpenSSH key parsing. We support extensions on PrivateKey types such as our own `Insecure.RSA.PrivateKey`, as well as existing SwiftCrypto types like `Curve25519.Signing.PrivateKey`:
-
 ```swift
 // Parse an OpenSSH RSA private key. This is the same format as the one used by OpenSSH
 let sshFile = try String(contentsOf: ..)
