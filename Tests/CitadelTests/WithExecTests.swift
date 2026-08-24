@@ -360,7 +360,25 @@ final class WithExecTests: XCTestCase {
         final class StdinCapture: ExecDelegate, @unchecked Sendable {
             private let lock = NSLock()
             private var _stdinReceived: Data?
-            var stdinReceived: Data? { lock.withLock { _stdinReceived } }
+            var stdinReceived: Data? {
+                withStdinLock { _stdinReceived }
+            }
+
+            private func captureStdin(_ data: Data) {
+                withStdinLock { _stdinReceived = data }
+            }
+
+            private func withStdinLock<Result>(_ body: () throws -> Result) rethrows -> Result {
+                #if compiler(>=6.0)
+                return try lock.withLock(body)
+                #else
+                // Swift 5.10 Foundation does not provide NSLock.withLock.
+                lock.lock()
+                defer { lock.unlock() }
+                return try body()
+                #endif
+            }
+
             struct Ctx: ExecCommandContext {
                 func terminate() async throws {}
             }
@@ -370,7 +388,7 @@ final class WithExecTests: XCTestCase {
                 input.readabilityHandler = { [weak self] handle in
                     let data = handle.availableData
                     if !data.isEmpty {
-                        self?.lock.withLock { self?._stdinReceived = data }
+                        self?.captureStdin(data)
                     }
                     handle.readabilityHandler = nil
                 }
