@@ -129,7 +129,7 @@ final class ExecHandler: ChannelDuplexHandler {
                 }
                 var buffer = channel.allocator.buffer(capacity: data.count)
                 buffer.writeContiguousBytes(data)
-                channel.write(SSHChannelData(type: .stdErr, data: .byteBuffer(buffer)), promise: nil)
+                channel.writeAndFlush(SSHChannelData(type: .stdErr, data: .byteBuffer(buffer)), promise: nil)
             } catch {
                 channel.close(promise: nil)
             }
@@ -139,7 +139,7 @@ final class ExecHandler: ChannelDuplexHandler {
             NIOPipeBootstrap(group: channel.eventLoop)
                 .channelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
                 .channelInitializer { pipeChannel in
-                    pipeChannel.pipeline.addHandlers(SSHInboundChannelDataWrapper(), theirs)
+                    pipeChannel.pipeline.addHandlers(SSHInboundChannelDataWrapper(), SSHOutboundChannelDataUnwrapper(), theirs)
                 }.withPipes(
                     inputDescriptor: dup(handler.stdoutPipe.fileHandleForReading.fileDescriptor),
                     outputDescriptor: dup(handler.stdinPipe.fileHandleForWriting.fileDescriptor)
