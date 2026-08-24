@@ -1,3 +1,4 @@
+#if os(macOS) || os(Linux)
 import Foundation
 import Crypto
 import _CryptoExtras
@@ -240,3 +241,4 @@ final class TestCertificateHelper {
         }
     }
 }
+#endif

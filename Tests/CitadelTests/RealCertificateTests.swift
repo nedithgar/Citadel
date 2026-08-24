@@ -1,3 +1,4 @@
+#if os(macOS) || os(Linux)
 import XCTest
 @testable import Citadel
 import NIO
@@ -24,3 +25,4 @@ final class RealCertificateTests: XCTestCase {
         XCTAssertNotNil(authMethod)
     }
 }
+#endif

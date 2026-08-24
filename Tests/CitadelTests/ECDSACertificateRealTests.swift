@@ -1,3 +1,4 @@
+#if os(macOS) || os(Linux)
 import XCTest
 import Crypto
 import _CryptoExtras
@@ -257,3 +258,4 @@ final class ECDSACertificateRealTests: XCTestCase {
         XCTAssertNotNil(p521Cert)
     }
 }
+#endif

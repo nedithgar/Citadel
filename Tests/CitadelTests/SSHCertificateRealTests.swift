@@ -1,3 +1,4 @@
+#if os(macOS) || os(Linux)
 import XCTest
 import NIOCore
 import Crypto
@@ -238,3 +239,4 @@ final class SSHCertificateRealTests: XCTestCase {
     // MARK: - Signature Type Tests
     
 }
+#endif

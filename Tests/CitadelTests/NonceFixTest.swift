@@ -1,3 +1,4 @@
+#if os(macOS) || os(Linux)
 import XCTest
 import Crypto
 import NIO
@@ -18,3 +19,4 @@ final class NonceFixTest: XCTestCase {
         XCTAssertTrue(certificate.validPrincipals.contains("testuser"))
     }
 }
+#endif

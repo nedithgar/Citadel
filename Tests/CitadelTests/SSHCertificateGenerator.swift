@@ -1,3 +1,4 @@
+#if os(macOS) || os(Linux)
 import Foundation
 import XCTest
 
@@ -343,3 +344,4 @@ enum SSHCertificateGenerator {
         return (userKeyPair.privateKey, userKeyPair.publicKey, certificatePath)
     }
 }
+#endif
