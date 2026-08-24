@@ -238,10 +238,6 @@ final class Citadel2Tests: XCTestCase {
     }
     
     func testRebex() async throws {
-        guard ProcessInfo.processInfo.environment["CITADEL_RUN_EXTERNAL_TESTS"] == "1" else {
-            throw XCTSkip("Set CITADEL_RUN_EXTERNAL_TESTS=1 to run the public Rebex integration test")
-        }
-
         let client = try await SSHClient.connect(
             host: "test.rebex.net",
             authenticationMethod: .passwordBased(username: "demo", password: "password"),
