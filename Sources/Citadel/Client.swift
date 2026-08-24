@@ -57,6 +57,75 @@ extension SSHAlgorithms.Modification<(NIOSSHPublicKeyProtocol.Type, NIOSSHSignat
 }
 
 public struct SSHAlgorithms: Sendable {
+    static let rsaSha256AuthenticationAlgorithm = NIOSSHUserAuthenticationAlgorithm(
+        name: "rsa-sha2-256",
+        certificate: .init(
+            publicKeyPrefix: "ssh-rsa-cert-v01@openssh.com",
+            name: "rsa-sha2-256-cert-v01@openssh.com"
+        )
+    )
+
+    static let rsaSha512AuthenticationAlgorithm = NIOSSHUserAuthenticationAlgorithm(
+        name: "rsa-sha2-512",
+        certificate: .init(
+            publicKeyPrefix: "ssh-rsa-cert-v01@openssh.com",
+            name: "rsa-sha2-512-cert-v01@openssh.com"
+        )
+    )
+
+    static let legacyRSACertificateAuthenticationAlgorithm = NIOSSHUserAuthenticationAlgorithm(
+        name: "ssh-rsa",
+        certificate: .init(
+            publicKeyPrefix: "ssh-rsa-cert-v01@openssh.com",
+            name: "ssh-rsa-cert-v01@openssh.com"
+        )
+    )
+
+    /// Registers Citadel's RSA key and signature support, including SHA-2 certificate mappings.
+    ///
+    /// Call this explicitly before loading RSA certificates, using Citadel's plain RSA or SHA-2 RSA
+    /// certificate authentication methods without ``all``, constructing RSA certificates directly
+    /// with NIOSSH, or configuring a server that needs RSA support without enabling ``all``
+    /// algorithms. Registration is process-wide, cannot be undone, and also enables RSA host-key
+    /// negotiation in NIOSSH.
+    /// This does not enable legacy `ssh-rsa-cert-v01@openssh.com` user authentication; use
+    /// ``registerLegacyRSACertificateAuthentication()`` only when compatibility requires it.
+    public static func registerRSA() {
+        NIOSSHAlgorithms.register(
+            publicKey: Insecure.RSA.PublicKey.self,
+            signature: Insecure.RSA.Signature.self
+        )
+        NIOSSHAlgorithms.register(
+            publicKey: Insecure.RSA.PublicKey.self,
+            signature: Insecure.RSA.Sha256Signature.self,
+            userAuthenticationAlgorithm: rsaSha256AuthenticationAlgorithm
+        )
+        NIOSSHAlgorithms.register(
+            publicKey: Insecure.RSA.PublicKey.self,
+            signature: Insecure.RSA.Sha512Signature.self,
+            userAuthenticationAlgorithm: rsaSha512AuthenticationAlgorithm
+        )
+    }
+
+    /// Enables legacy `ssh-rsa-cert-v01@openssh.com` user authentication.
+    ///
+    /// This process-wide registration enables RSA certificate authentication signatures that use
+    /// SHA-1. Prefer the SHA-2 mappings registered by ``registerRSA()`` whenever the peer supports
+    /// them. Registration is idempotent, but cannot be undone for the lifetime of the process.
+    ///
+    /// Calling this method does not change the algorithm selected by an authentication method. It
+    /// enables
+    /// ``SSHAuthenticationMethod/rsaCertificate(username:privateKey:certificate:trustedCAs:clientAddress:validateCertificate:)``
+    /// and servers that must accept the legacy RSA certificate authentication name.
+    public static func registerLegacyRSACertificateAuthentication() {
+        registerRSA()
+        NIOSSHAlgorithms.register(
+            publicKey: Insecure.RSA.PublicKey.self,
+            signature: Insecure.RSA.Signature.self,
+            userAuthenticationAlgorithm: legacyRSACertificateAuthenticationAlgorithm
+        )
+    }
+
     /// Represents a modification to a list of items.
     ///
     /// - replace: Replaces the existing list of items with the given list of items.
@@ -74,20 +143,37 @@ public struct SSHAlgorithms: Sendable {
 
     public var publicKeyAlgorihtms: Modification<(NIOSSHPublicKeyProtocol.Type, NIOSSHSignatureProtocol.Type)>?
 
+    private var enablesRSA = false
+    private var enablesLegacyRSACertificateAuthentication = false
+
     func apply(to clientConfiguration: inout SSHClientConfiguration) {
         transportProtectionSchemes?.apply(to: &clientConfiguration.transportProtectionSchemes)
         keyExchangeAlgorithms?.apply(to: &clientConfiguration.keyExchangeAlgorithms)
-        publicKeyAlgorihtms?.register()
+        registerPublicKeyAlgorithms()
     }
     
     func apply(to serverConfiguration: inout SSHServerConfiguration) {
         transportProtectionSchemes?.apply(to: &serverConfiguration.transportProtectionSchemes)
         keyExchangeAlgorithms?.apply(to: &serverConfiguration.keyExchangeAlgorithms)
+        registerPublicKeyAlgorithms()
+    }
+
+    private func registerPublicKeyAlgorithms() {
         publicKeyAlgorihtms?.register()
+        if enablesLegacyRSACertificateAuthentication {
+            Self.registerLegacyRSACertificateAuthentication()
+        } else if enablesRSA {
+            Self.registerRSA()
+        }
     }
     
     public init() {}
 
+    /// All compatibility algorithms implemented by Citadel.
+    ///
+    /// This includes legacy `ssh-rsa-cert-v01@openssh.com` authentication. Applying this value
+    /// performs the same process-wide, one-way registration as
+    /// ``registerLegacyRSACertificateAuthentication()``.
     public static let all: SSHAlgorithms = {
         var algorithms = SSHAlgorithms()
 
@@ -100,9 +186,8 @@ public struct SSHAlgorithms: Sendable {
             DiffieHellmanGroup14Sha256.self
         ])
 
-        algorithms.publicKeyAlgorihtms = .add([
-            (Insecure.RSA.PublicKey.self, Insecure.RSA.Signature.self)
-        ])
+        algorithms.enablesRSA = true
+        algorithms.enablesLegacyRSACertificateAuthentication = true
 
         return algorithms
     }()

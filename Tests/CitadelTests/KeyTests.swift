@@ -545,46 +545,47 @@ final class KeyTests: XCTestCase {
         
         // Test cross-validation fails (wrong algorithm)
         XCTAssertFalse(publicKey.isValidSignature(
-            Insecure.RSA.Signature(rawRepresentation: sha256Signature.rawRepresentation, algorithm: .sha1),
+            Insecure.RSA.TaggedSignature(
+                rawRepresentation: sha256Signature.rawRepresentation,
+                algorithm: .sha1
+            ),
             for: message
         ))
         
-        // Test signature serialization and deserialization
+        // NIOSSH owns the outer algorithm prefix, while each fixed-algorithm type owns only the body.
+        let wrappedSignature = Insecure.RSA.Sha256Signature(
+            rawRepresentation: sha256Signature.rawRepresentation
+        )
         var buffer = ByteBuffer()
-        _ = sha256Signature.write(to: &buffer)
-        let deserializedSig = try Insecure.RSA.Signature.read(from: &buffer)
-        XCTAssertEqual(deserializedSig.algorithm, .sha256)
-        XCTAssertEqual(deserializedSig.rawRepresentation, sha256Signature.rawRepresentation)
-        XCTAssertTrue(publicKey.isValidSignature(deserializedSig, for: message))
+        _ = wrappedSignature.write(to: &buffer)
+        let deserializedSignature = try Insecure.RSA.Sha256Signature.read(from: &buffer)
+        XCTAssertEqual(deserializedSignature.rawRepresentation, sha256Signature.rawRepresentation)
+        XCTAssertTrue(publicKey.isValidSignature(deserializedSignature, for: message))
+
+        let sha512WireSignature = Insecure.RSA.Sha512Signature(
+            rawRepresentation: sha512Signature.rawRepresentation
+        )
+        XCTAssertTrue(publicKey.isValidSignature(sha512WireSignature, for: message))
+
+        let incorrectlyLabeledSignature = Insecure.RSA.Signature(
+            rawRepresentation: sha256Signature.rawRepresentation
+        )
+        XCTAssertFalse(publicKey.isValidSignature(incorrectlyLabeledSignature, for: message))
+
+        var taggedSignatureBuffer = ByteBuffer()
+        _ = sha512Signature.write(to: &taggedSignatureBuffer)
+        let decodedTaggedSignature = try Insecure.RSA.TaggedSignature.read(from: &taggedSignatureBuffer)
+        XCTAssertEqual(decodedTaggedSignature.algorithm, .sha512)
+        XCTAssertEqual(decodedTaggedSignature.rawRepresentation, sha512Signature.rawRepresentation)
     }
     
     func testRSACertificateKeyTypes() throws {
-        // Test that certificate key type prefixes are correctly defined
-        // Test that certificate algorithm variants are correctly defined
-        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha1Cert.rawValue, "ssh-rsa-cert-v01@openssh.com")
-        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha256Cert.rawValue, "rsa-sha2-256-cert-v01@openssh.com")
-        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha512Cert.rawValue, "rsa-sha2-512-cert-v01@openssh.com")
-        
-        // Test certificate algorithm enum
-        let sha1Cert = Insecure.RSA.SignatureHashAlgorithm.sha1Cert
-        XCTAssertTrue(sha1Cert.isCertificate)
-        XCTAssertEqual(sha1Cert.baseAlgorithm, .sha1)
-        XCTAssertEqual(sha1Cert.nid, Int32(64)) // NID_sha1
-        
-        let sha256Cert = Insecure.RSA.SignatureHashAlgorithm.sha256Cert
-        XCTAssertTrue(sha256Cert.isCertificate)
-        XCTAssertEqual(sha256Cert.baseAlgorithm, .sha256)
-        XCTAssertEqual(sha256Cert.nid, Int32(672)) // NID_sha256
-        
-        let sha512Cert = Insecure.RSA.SignatureHashAlgorithm.sha512Cert
-        XCTAssertTrue(sha512Cert.isCertificate)
-        XCTAssertEqual(sha512Cert.baseAlgorithm, .sha512)
-        XCTAssertEqual(sha512Cert.nid, Int32(674)) // NID_sha512
-        
-        // Test non-certificate algorithms
-        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha1.isCertificate)
-        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha256.isCertificate)
-        XCTAssertFalse(Insecure.RSA.SignatureHashAlgorithm.sha512.isCertificate)
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha1.rawValue, "ssh-rsa")
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha256.rawValue, "rsa-sha2-256")
+        XCTAssertEqual(Insecure.RSA.SignatureHashAlgorithm.sha512.rawValue, "rsa-sha2-512")
+        XCTAssertEqual(Insecure.RSA.Signature.signaturePrefix, "ssh-rsa")
+        XCTAssertEqual(Insecure.RSA.Sha256Signature.signaturePrefix, "rsa-sha2-256")
+        XCTAssertEqual(Insecure.RSA.Sha512Signature.signaturePrefix, "rsa-sha2-512")
     }
     
     func testRSACertificateKeyTypeDetection() throws {
@@ -613,8 +614,19 @@ final class KeyTests: XCTestCase {
         
         // Test that the class still works as before
         let message = "Test backward compatibility".data(using: .utf8)!
-        let signature = try privateKey.signature(for: message)
+        let signature: Insecure.RSA.Signature = try privateKey.signature(for: message)
+        let protocolSignature: NIOSSHSignatureProtocol = signature
+        XCTAssertEqual(type(of: protocolSignature).signaturePrefix, "ssh-rsa")
         XCTAssertTrue(publicKey.isValidSignature(signature, for: message))
+
+        var signatureBuffer = ByteBuffer()
+        XCTAssertEqual(
+            signature.write(to: &signatureBuffer),
+            signature.rawRepresentation.count + MemoryLayout<UInt32>.size
+        )
+        let decodedSignature = try Insecure.RSA.Signature.read(from: &signatureBuffer)
+        XCTAssertEqual(decodedSignature.rawRepresentation, signature.rawRepresentation)
+        XCTAssertEqual(signatureBuffer.readableBytes, 0)
         
         // Test serialization/deserialization
         var buffer = ByteBuffer()
