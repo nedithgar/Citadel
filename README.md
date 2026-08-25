@@ -38,7 +38,7 @@ let privateKey = try Curve25519.Signing.PrivateKey(
     rawRepresentation: privateKeyData
 )
 let settings = SSHClientSettings(
-    host: "example.com", 
+    host: "example.com",
     authenticationMethod: { .ed25519(username: "user", privateKey: privateKey) },
     hostKeyValidator: .acceptAnything()
 )
@@ -48,31 +48,44 @@ let settings = SSHClientSettings(
 
 Citadel supports SSH certificate authentication for enhanced security:
 
+- File-based example:
+
 ```swift
-// Load private key and certificate
+let privateKeyURL = URL(fileURLWithPath: "/path/to/id_ed25519")
 let privateKey = try Curve25519.Signing.PrivateKey(
-    rawRepresentation: privateKeyData
+    sshEd25519: Data(contentsOf: privateKeyURL)
 )
-let certificate = try Ed25519.CertificatePublicKey(
-    certificateData: certificateData
+let certificate = try NIOSSHCertificateLoader.loadFromOpenSSHFile(
+    at: "/path/to/id_ed25519-cert.pub"
+)
+let authenticationMethod = try SSHAuthenticationMethod.ed25519Certificate(
+    username: "user",
+    privateKey: privateKey,
+    certificate: certificate
 )
 
-// Use certificate authentication
-let settings = SSHClientSettings(
+let client = try await SSHClient.connect(
     host: "example.com",
-    authenticationMethod: { 
-        .ed25519Certificate(username: "user", privateKey: privateKey, certificate: certificate)
-    },
-    hostKeyValidator: .acceptAnything()
+    authenticationMethod: authenticationMethod,
+    hostKeyValidator: .acceptAnything(),
+    reconnect: .never
 )
 ```
 
 Supported certificate types:
-- ✅ Ed25519 certificates (full authentication support)
-- ✅ RSA certificates (parsing only, no NIOSSH authentication support) 
-- ✅ ECDSA certificates (P256, P384, P521 - full authentication support)
 
-For more details on certificate authentication, see the [Certificate Authentication Documentation](Documentation/CertificateAuthentication.md).
+- Ed25519 with `ed25519Certificate`
+- RSA SHA-256 and SHA-512 with `rsaSha256Certificate` and `rsaSha512Certificate`
+- Legacy RSA SHA-1 with `rsaCertificate`
+- ECDSA P-256, P-384, and P-521 with `p256Certificate`, `p384Certificate`, and `p521Certificate`
+
+Before loading a certificate whose subject key or CA signature uses RSA, register Citadel's RSA algorithms:
+
+```swift
+SSHAlgorithms.registerRSA()
+```
+
+Registration is process-wide. Prefer the RSA SHA-2 authentication methods. If a server requires legacy RSA SHA-1 certificate authentication, call `SSHAlgorithms.registerLegacyRSACertificateAuthentication()` and use `rsaCertificate` instead. To validate a certificate locally before authentication, pass `trustedCAs` and set `validateCertificate` to `true` when creating the authentication method.
 
 Using that client, we support a couple types of operations:
 
@@ -376,6 +389,7 @@ When you implement SFTP in Citadel, you're responsible for taking care of logist
 ## Helpers
 
 The most important helper most people need is OpenSSH key parsing. We support extensions on PrivateKey types such as our own `Insecure.RSA.PrivateKey`, as well as existing SwiftCrypto types like `Curve25519.Signing.PrivateKey`:
+
 ```swift
 // Parse an OpenSSH RSA private key. This is the same format as the one used by OpenSSH
 let sshFile = try String(contentsOf: ..)
@@ -417,12 +431,6 @@ let client = try await SSHClient.connect(
 ```
 
 You can also use `SSHAlgorithms.all` to enable all supported algorithms.
-
-## TODO
-
-A couple of code is held back until further work in SwiftNIO SSH is completed. We're currently working with Apple to resolve these.
-
-- [ ] RSA Authentication (implemented & supported, but in a [fork of NIOSSH](https://github.com/Joannis/swift-nio-ssh-1/pull/1))
 
 ## Contributing
 
