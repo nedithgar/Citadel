@@ -11,6 +11,67 @@ final class WithExecTests: XCTestCase {
 
     private struct TestTimeout: Error {}
 
+    private actor StderrLifecycle {
+        private let receiptStream: AsyncStream<Void>
+        private let receiptContinuation: AsyncStream<Void>.Continuation
+        private var writerClosed = false
+
+        init() {
+            (receiptStream, receiptContinuation) = AsyncStream<Void>.makeStream()
+        }
+
+        func waitForReceipt() async {
+            for await _ in receiptStream {
+                return
+            }
+        }
+
+        func recordReceipt() -> Bool {
+            let receivedBeforeEOF = !writerClosed
+            receiptContinuation.yield()
+            receiptContinuation.finish()
+            return receivedBeforeEOF
+        }
+
+        func markWriterClosed() {
+            writerClosed = true
+        }
+    }
+
+    private actor FailureLifecycle {
+        private let stream: AsyncStream<Void>
+        private let continuation: AsyncStream<Void>.Continuation
+
+        init() {
+            (stream, continuation) = AsyncStream<Void>.makeStream()
+        }
+
+        func waitForFailure() async {
+            for await _ in stream {
+                return
+            }
+        }
+
+        func triggerFailure() {
+            continuation.yield()
+            continuation.finish()
+        }
+    }
+
+    /// Bridges an NIO future without trapping a cancelled structured task.
+    private static func getRespectingCancellation<Value: Sendable>(
+        _ future: EventLoopFuture<Value>
+    ) async throws -> Value {
+        let proxy = future.eventLoop.makePromise(of: Value.self)
+        future.cascade(to: proxy)
+
+        return try await withTaskCancellationHandler {
+            try await proxy.futureResult.get()
+        } onCancel: {
+            proxy.fail(CancellationError())
+        }
+    }
+
     private func runTest(
         timeout: Duration = .seconds(5),
         perform: @escaping (SSHServer, SSHClient) async throws -> Void
@@ -213,8 +274,6 @@ final class WithExecTests: XCTestCase {
                     handle.write(Data("error output".utf8))
                     try? handle.close()
                     try? outputHandler.stdoutPipe.fileHandleForWriting.close()
-                    // Let the readabilityHandler fire and flush before closing
-                    Thread.sleep(forTimeInterval: 0.3)
                     outputHandler.succeed(exitCode: 0)
                 }
                 return Ctx()
@@ -236,6 +295,73 @@ final class WithExecTests: XCTestCase {
                     }
                 }
                 XCTAssertEqual(String(buffer: collected), "error output")
+            }
+        }
+    }
+
+    /// Stderr is forwarded as it is produced rather than being buffered until
+    /// the writer closes its end of the pipe.
+    func testWithExecStreamsStderrBeforeEOF() async throws {
+        final class StreamingExec: ExecDelegate, @unchecked Sendable {
+            struct Ctx: ExecCommandContext {
+                func terminate() async throws {}
+            }
+
+            let lifecycle: StderrLifecycle
+
+            init(lifecycle: StderrLifecycle) {
+                self.lifecycle = lifecycle
+            }
+
+            func setEnvironmentValue(_ value: String, forKey key: String) async throws {}
+
+            func start(command: String, outputHandler: ExecOutputHandler) async throws -> ExecCommandContext {
+                let lifecycle = self.lifecycle
+                Task {
+                    let stderr = outputHandler.stderrPipe.fileHandleForWriting
+                    stderr.write(Data("streamed stderr".utf8))
+                    try? outputHandler.stdoutPipe.fileHandleForWriting.close()
+
+                    // Wait for the client to receive the chunk. The timeout lets
+                    // detached read-to-EOF implementations finish so the test
+                    // fails cleanly instead of leaving a stuck task.
+                    await withTaskGroup(of: Void.self) { group in
+                        group.addTask {
+                            await lifecycle.waitForReceipt()
+                        }
+                        group.addTask {
+                            try? await Task.sleep(for: .seconds(2))
+                        }
+                        await group.next()
+                        group.cancelAll()
+                    }
+
+                    await lifecycle.markWriterClosed()
+                    try? stderr.close()
+                    outputHandler.succeed(exitCode: 0)
+                }
+                return Ctx()
+            }
+        }
+
+        let lifecycle = StderrLifecycle()
+
+        try await runTest { server, client in
+            server.enableExec(withDelegate: StreamingExec(lifecycle: lifecycle))
+
+            try await client.withExec("test") { inbound, _ in
+                var collected = ByteBuffer()
+                var receivedBeforeEOF = false
+
+                for try await chunk in inbound {
+                    if case .stderr(let buffer) = chunk {
+                        receivedBeforeEOF = await lifecycle.recordReceipt()
+                        collected.writeImmutableBuffer(buffer)
+                    }
+                }
+
+                XCTAssertTrue(receivedBeforeEOF)
+                XCTAssertEqual(String(buffer: collected), "streamed stderr")
             }
         }
     }
@@ -273,6 +399,99 @@ final class WithExecTests: XCTestCase {
         }
     }
 
+    /// Once an exec request has succeeded, a later process failure is reported
+    /// as an abnormal exit without a contradictory channel-failure reply. The
+    /// terminal callback also closes Citadel's stderr writer when retained.
+    func testExecFailureAfterChannelSuccessDoesNotSendChannelFailure() async throws {
+        struct ProcessFailure: Error {}
+
+        final class Exec: ExecDelegate, @unchecked Sendable {
+            struct Ctx: ExecCommandContext {
+                func terminate() async throws {}
+            }
+
+            let lifecycle: FailureLifecycle
+            private var retainedOutputHandler: ExecOutputHandler?
+
+            init(lifecycle: FailureLifecycle) {
+                self.lifecycle = lifecycle
+            }
+
+            func setEnvironmentValue(_ value: String, forKey key: String) async throws {}
+
+            func start(command: String, outputHandler: ExecOutputHandler) async throws -> ExecCommandContext {
+                retainedOutputHandler = outputHandler
+                let lifecycle = self.lifecycle
+                Task {
+                    await lifecycle.waitForFailure()
+                    try? outputHandler.stdoutPipe.fileHandleForWriting.close()
+                    outputHandler.fail(ProcessFailure())
+                }
+                return Ctx()
+            }
+        }
+
+        final class ReplyRecorder: ChannelInboundHandler {
+            typealias InboundIn = SSHChannelData
+
+            let successPromise: EventLoopPromise<Void>
+            let completionPromise: EventLoopPromise<(sawChannelFailure: Bool, exitStatus: Int?)>
+            private var sawChannelFailure = false
+            private var exitStatus: Int?
+
+            init(eventLoop: EventLoop) {
+                successPromise = eventLoop.makePromise()
+                completionPromise = eventLoop.makePromise()
+            }
+
+            func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+                switch event {
+                case is ChannelSuccessEvent:
+                    successPromise.succeed()
+                case is ChannelFailureEvent:
+                    sawChannelFailure = true
+                case let status as SSHChannelRequestEvent.ExitStatus:
+                    exitStatus = status.exitStatus
+                default:
+                    context.fireUserInboundEventTriggered(event)
+                }
+            }
+
+            func handlerRemoved(context: ChannelHandlerContext) {
+                completionPromise.succeed((sawChannelFailure, exitStatus))
+            }
+        }
+
+        let lifecycle = FailureLifecycle()
+
+        try await runTest { server, client in
+            let exec = Exec(lifecycle: lifecycle)
+            server.enableExec(withDelegate: exec)
+
+            let recorder = ReplyRecorder(eventLoop: client.eventLoop)
+            let channel = try await Self.getRespectingCancellation(
+                client.eventLoop.flatSubmit {
+                    let createChannel = client.eventLoop.makePromise(of: Channel.self)
+                    client.session.sshHandler.value.createChannel(createChannel) { channel, _ in
+                        channel.pipeline.addHandler(recorder)
+                    }
+                    return createChannel.futureResult
+                }
+            )
+
+            try await channel.triggerUserOutboundEvent(
+                SSHChannelRequestEvent.ExecRequest(command: "test", wantReply: true)
+            )
+            try await Self.getRespectingCancellation(recorder.successPromise.futureResult)
+
+            await lifecycle.triggerFailure()
+
+            let result = try await Self.getRespectingCancellation(recorder.completionPromise.futureResult)
+            XCTAssertFalse(result.sawChannelFailure)
+            XCTAssertEqual(result.exitStatus, 255)
+        }
+    }
+
     // MARK: - ExecHandler infrastructure tests
     // These use public APIs other than withExec to show the fixes are
     // necessary at the server handler level, not specific to one client API.
@@ -294,7 +513,6 @@ final class WithExecTests: XCTestCase {
                     try? handle.close()
                     // No stdout at all — close it immediately
                     try? outputHandler.stdoutPipe.fileHandleForWriting.close()
-                    Thread.sleep(forTimeInterval: 0.3)
                     outputHandler.succeed(exitCode: 0)
                 }
                 return Ctx()
