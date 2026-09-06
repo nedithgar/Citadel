@@ -183,10 +183,11 @@ public final class SSHAuthenticationMethod: NIOSSHClientUserAuthenticationDelega
             return
         }
         
-        let implementation = implementations.removeFirst()
+        let implementation = implementations[0]
 
         switch implementation {
         case .user(let username, offer: let offer):
+            implementations.removeFirst()
             switch offer {
             case .password:
                 guard availableMethods.contains(.password) else {
@@ -209,6 +210,8 @@ public final class SSHAuthenticationMethod: NIOSSHClientUserAuthenticationDelega
             
             nextChallengePromise.succeed(NIOSSHUserAuthenticationOffer(username: username, serviceName: "", offer: offer))
         case .custom(let implementation):
+            // A custom delegate owns its sequence of offers and signals exhaustion
+            // through the promise. Keep it for subsequent server challenges.
             implementation.nextAuthenticationType(availableMethods: availableMethods, nextChallengePromise: nextChallengePromise)
         }
     }
